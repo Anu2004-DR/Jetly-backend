@@ -1,0 +1,214 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum BookingType {
+  BUS
+  TRAIN
+  FLIGHT
+}
+
+enum BookingStatus {
+  PENDING_PAYMENT
+  CONFIRMED
+  FAILED
+  CANCELLED
+  EXPIRED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+
+
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String?
+  email     String   @unique
+  password  String?
+
+  provider  String   @default("otp") 
+  role      String   @default("USER") // USER | ADMIN
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bookings  Booking[]
+
+  @@index([email])
+}
+
+
+
+model Bus {
+  id        Int      @id @default(autoincrement())
+  busName   String
+  fromCity  String
+  toCity    String
+  departure String
+  arrival   String
+
+  price     Float
+  seats     Int
+
+  createdAt DateTime @default(now())
+
+  bookings  Booking[]
+
+  @@index([fromCity, toCity])
+  @@index([departure])
+}
+
+
+
+model Train {
+  id          Int      @id @default(autoincrement())
+  trainNumber String
+  trainName   String
+
+  fromCity    String
+  toCity      String
+
+  departure   String
+  arrival     String
+
+  price       Float
+  seats       Int
+
+  createdAt   DateTime @default(now())
+
+  bookings    Booking[]
+
+  @@index([fromCity, toCity])
+  @@index([departure])
+}
+
+
+model Flight {
+  id        Int      @id @default(autoincrement())
+
+  flightNo  String?
+  airline   String
+
+  fromCity  String
+  toCity    String
+
+  departure DateTime  
+  arrival   DateTime   
+
+  duration  String
+  stops     Int        
+
+  price     Float
+  seats     Int?
+
+  /
+  searchKey String     
+  cachedAt  DateTime   @default(now())
+
+  createdAt DateTime   @default(now())
+
+  bookings  Booking[]
+
+  @@index([fromCity, toCity])
+  @@index([searchKey])
+}
+
+
+
+model Booking {
+  id Int @id @default(autoincrement())
+
+  pnr String @unique
+
+  userId Int
+  user   User @relation(fields: [userId], references: [id])
+
+  bookingType BookingType
+
+  busId Int?
+  trainId Int?
+  flightId Int?
+
+  flightData Json?
+
+  passengerName  String
+  passengerAge   Int
+  passengerPhone String @db.VarChar(15)
+  passengerEmail String @db.VarChar(255)
+
+  totalPrice Float
+  priceAtBooking Float   
+
+  status BookingStatus @default(PENDING_PAYMENT)
+
+  lockExpiry DateTime?  
+
+  checkedIn     Boolean   @default(false)
+  checkedInAt   DateTime?
+  checkInCount  Int       @default(0)
+  lastScannedAt DateTime?
+
+  isDeleted Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bus    Bus?    @relation(fields: [busId], references: [id])
+  train  Train?  @relation(fields: [trainId], references: [id])
+  flight Flight? @relation(fields: [flightId], references: [id])
+
+  payment Payment?
+  scanLogs ScanLog[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([pnr])
+  @@index([busId])
+  @@index([trainId])
+  @@index([flightId])
+}
+
+
+model Payment {
+  id Int @id @default(autoincrement())
+
+  bookingId Int @unique
+  amount Float
+
+  status PaymentStatus
+  transactionId String?
+
+  createdAt DateTime @default(now())
+
+  booking Booking @relation(fields: [bookingId], references: [id])
+
+  @@index([status])
+}
+
+
+model ScanLog {
+  id          Int      @id @default(autoincrement())
+  bookingId   Int
+  booking     Booking  @relation(fields: [bookingId], references: [id])
+
+  scannedBy   String
+  result      String
+  reason      String?
+  ipAddress   String?
+  userAgent   String?
+
+  createdAt   DateTime @default(now())
+
+  @@index([bookingId])
+}
