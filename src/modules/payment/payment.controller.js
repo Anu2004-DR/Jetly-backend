@@ -1,49 +1,78 @@
+const prisma = require("../../config/prisma");
+const razorpay = require("./razorpay");
+const crypto = require("crypto");
 const { verifyPaymentService } = require("./payment.service");
 
-const pay = async (req, res) => {
+exports.createOrder = async (req, res) => {
   try {
+    const { bookingId } = req.body;
 
-    const { bookingId, paymentStatus } = req.body;
-
-    if (!bookingId || !paymentStatus) {
-      return res.status(400).json({
-        success: false,
-        message: "bookingId and paymentStatus are required",
-      });
-    }
-    
-
-    await prisma.booking.update({
-  where: { id: bookingId },
-  data: {
-    status: "CONFIRMED",
-    pnr: "PNR" + Math.floor(Math.random() * 1000000)
-  }
-});
-    const result = await verifyPaymentService({
-      bookingId: Number(bookingId),
-      paymentStatus,
-      transactionId: "TXN" + Date.now(),
+    const booking = await prisma.booking.findUnique({
+      where: { id: Number(bookingId) },
     });
 
-    return res.status(200).json({
+    if (!booking) throw new Error("Booking not found");
+
+    const order = await razorpay.orders.create({
+      amount: booking.totalPrice * 100,
+      currency: "INR",
+      receipt: `receipt_${bookingId}`,
+    });
+
+    res.json({
       success: true,
-      message:
-        paymentStatus === "SUCCESS"
-          ? "Payment successful, booking confirmed"
-          : "Payment failed",
-      data: result,
+      order,
     });
 
   } catch (err) {
-
-    console.error("PAYMENT ERROR:", err);
-
-    return res.status(400).json({
+    res.status(400).json({
       success: false,
-      message: err.message || "Payment failed",
+      message: err.message,
     });
   }
 };
 
-module.exports = { pay };
+
+exports.verifyPayment = async (req, res) => {
+  try {
+    const {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      bookingId,
+    } = req.body;
+
+    // 🔐 Signature verification
+    const body = razorpay_order_id + "|" + razorpay_payment_id;
+
+    const expectedSignature = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(body)
+      .digest("hex");
+
+    if (expectedSignature !== razorpay_signature) {
+      throw new Error("Payment verification failed");
+    }
+
+    // ✅ CALL YOUR SERVICE (you already built this ✔)
+    const result = await verifyPaymentService({
+      bookingId: Number(bookingId),
+      paymentStatus: "SUCCESS",
+      transactionId: razorpay_payment_id,
+    });
+
+    res.json({
+      success: true,
+      message: "Payment verified & booking confirmed",
+      data: result,
+    });
+
+  } catch (err) {
+    console.error("VERIFY ERROR:", err);
+
+    res.status(400).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};

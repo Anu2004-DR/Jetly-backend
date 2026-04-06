@@ -2,11 +2,12 @@
 
 const prisma = require("../../config/prisma");
 const crypto = require("crypto");
+const { v4: uuidv4 } = require("uuid");
 const { sendCancellationEmail } = require("../../utils/email");
+const razorpay = require("../payment/razorpay");
 
 
 const LOCK_TIME_MINUTES = 5;
-
 
 const CANCELLABLE_STATUSES = ["PENDING_PAYMENT", "CONFIRMED"];
 
@@ -19,116 +20,148 @@ const isValidEmail = (email) =>
 const generatePNR = () =>
   "PNR" + crypto.randomBytes(5).toString("hex").toUpperCase();
 
-const resolveTransport = (type, data) => {
-  const map = {
-    BUS: { field: "busId", rawId: data.busId },
-    TRAIN: { field: "trainId", rawId: data.trainId },
-    
-  };
 
-  const entry = map[type];
-  if (!entry) throw new Error(`Invalid booking type: ${type}`);
+// ================= CREATE BOOKING =================
 
-  const id = Number(entry.rawId);
-  if (!id || isNaN(id)) {
-    throw new Error(`${type} ID is missing or invalid`);
-  }
+const createBookingService = async (data, userId) => {
 
-  return { field: entry.field, id };
-};
+  const type = data.bookingType?.toUpperCase(); // ✅ IMPORTANT FIX
+  const { entityId, offer } = data;
 
-
-const createBookingService = async (data) => {
-  const {
-    bookingType,
-    passengerName,
-    passengerAge,
-    passengerPhone,
-    passengerEmail,
-    totalPrice,
-    userId,
-    flight
-  } = data;
-
-  const type = bookingType?.toUpperCase();
+  console.log("BOOKING DATA:", data); // 🔍 DEBUG
 
   if (!type) throw new Error("Booking type required");
 
-  if (!["BUS", "TRAIN", "FLIGHT"].includes(type)) {
+  if (!["FLIGHT", "TRAIN", "BUS"].includes(type)) {
     throw new Error("Invalid booking type");
   }
 
-  if (!passengerPhone || !passengerEmail) {
-    throw new Error("Passenger details required");
+  if (!isValidEmail(data.passengerEmail)) {
+    throw new Error("Invalid email");
   }
 
-  const price = parseFloat(totalPrice);
-  if (!price || price <= 0) throw new Error("Invalid price");
+  let price = 0;
 
-  const lockExpiry = new Date(Date.now() + 5 * 60 * 1000);
+  let bookingData = {
+    userId,
+    bookingType: type,
+    pnr: generatePNR(),
+    passengerName: data.passengerName || "Guest",
+    passengerAge: data.passengerAge || 21,
+    passengerPhone: data.passengerPhone,
+    passengerEmail: data.passengerEmail,
+    status: "PENDING_PAYMENT",
+    lockExpiry: new Date(Date.now() + LOCK_TIME_MINUTES * 60 * 1000),
+  };
 
   return await prisma.$transaction(async (tx) => {
 
-    let transportField = null;
-    let transportId = null;
+    // ================= BUS =================
+    if (type === "BUS") {
 
-    
-    if (type !== "FLIGHT") {
-      const result = resolveTransport(type, data);
-      transportField = result.field;
-      transportId = result.id;
+  if (!entityId) throw new Error("Bus ID required");
 
-      const modelMap = {
-        BUS: tx.bus,
-        TRAIN: tx.train,
-      };
+  const bus = await tx.bus.findUnique({
+    where: { id: entityId }
+  });
 
-      const model = modelMap[type];
+  if (!bus) throw new Error("Bus not found");
 
-      const transport = await model.findUnique({
-        where: { id: transportId },
+  if (bus.seats <= 0) {
+    throw new Error("No seats available");
+  }
+
+  // ✅ FIRST assign price
+  price = Number(bus.price);
+
+  // ✅ THEN validate
+  if (!price || isNaN(price) || price <= 0) {
+    throw new Error("Invalid price");
+  }
+
+  await tx.bus.update({
+    where: { id: entityId },
+    data: { seats: { decrement: 1 } }
+  });
+
+  bookingData.busId = entityId;
+}
+    // ================= TRAIN =================
+    if (type === "TRAIN") {
+
+      if (!entityId) throw new Error("Train ID required");
+
+      const train = await tx.train.findUnique({
+        where: { id: entityId }
       });
 
-      if (!transport) throw new Error(`${type} not found`);
+      if (!train) throw new Error("Train not found");
 
-      if (transport.seats <= 0) {
+      if (train.seats <= 0) {
         throw new Error("No seats available");
       }
 
-      await model.update({
-        where: { id: transportId },
-        data: { seats: { decrement: 1 } },
+      price = train.price;
+
+      await tx.train.update({
+        where: { id: entityId },
+        data: { seats: { decrement: 1 } }
       });
+
+      bookingData.trainId = entityId;
     }
 
-    
-    const bookingData = {
-      pnr: generatePNR(),
-      bookingType: type,
-      passengerName: passengerName || "Guest",
-      passengerAge: Number(passengerAge) || 21,
-      passengerPhone,
-      passengerEmail,
-      totalPrice: price,
-      priceAtBooking: price,
-      status: "PENDING_PAYMENT",
-      lockExpiry,
-      userId,
-    };
-
-
+    // ================= FLIGHT =================
     if (type === "FLIGHT") {
-      if (!flight) {
-        throw new Error("Flight data required");
+
+      // DB MODE
+      if (entityId) {
+        const flight = await tx.flight.findUnique({
+          where: { id: entityId }
+        });
+
+        if (!flight) throw new Error("Flight not found");
+
+        if (flight.seats !== null && flight.seats <= 0) {
+          throw new Error("No seats available");
+        }
+
+        price = flight.price;
+
+        if (flight.seats !== null) {
+          await tx.flight.update({
+            where: { id: entityId },
+            data: { seats: { decrement: 1 } }
+          });
+        }
+
+        bookingData.flightId = entityId;
       }
 
-      bookingData.flightData = flight; 
-    } else {
-      bookingData[transportField] = transportId;
+      // API MODE
+      else if (offer) {
+        price = cleanPrice(offer.price);
+
+        if (!price) throw new Error("Invalid offer price");
+
+        bookingData.flightData = offer;
+      }
+
+      else {
+        throw new Error("Flight data required");
+      }
     }
 
+    // FINAL PRICE CHECK (🔥 FIX)
+    if (!price || price <= 0) {
+      throw new Error("Invalid price");
+    }
+
+    bookingData.totalPrice = price;
+    bookingData.priceAtBooking = price;
+
     const booking = await tx.booking.create({
-      data: bookingData,
+      data: bookingData
     });
 
     return booking;
@@ -136,15 +169,11 @@ const createBookingService = async (data) => {
 };
 
 
-
+// ================= HISTORY =================
 
 const getBookingHistoryService = async (userId) => {
 
-  console.log("USER ID:", userId); 
-
-  if (!userId) {
-    throw new Error("User ID required");
-  }
+  if (!userId) throw new Error("User ID required");
 
   return prisma.booking.findMany({
     where: { userId },
@@ -158,99 +187,171 @@ const getBookingHistoryService = async (userId) => {
 };
 
 
+// ================= CANCEL =================
+
+
+
+/* =========================
+   CANCEL + REFUND SERVICE
+========================= */
 
 const cancelBookingService = async (bookingId) => {
-  if (!bookingId) throw new Error("Booking ID required");
+  return await prisma.$transaction(async (tx) => {
 
-  let email;
-  let cancelled;
-  let refundAmount = 0;
+    /* =========================
+       GET BOOKING
+    ========================= */
 
-  await prisma.$transaction(async (tx) => {
     const booking = await tx.booking.findUnique({
       where: { id: bookingId },
-      include: {
-        bus: true,
-        train: true,
-        flight: true,
-        payment: true,
-      },
     });
 
     if (!booking) throw new Error("Booking not found");
 
     if (booking.status === "CANCELLED") {
-      throw new Error("Already cancelled");
+      throw new Error("Booking already cancelled");
     }
 
-    
-    const transport =
-      booking.bus || booking.train || booking.flight;
-
-   
-    if (booking.status === "CONFIRMED") {
-      refundAmount = calculateRefund(booking, transport);
-
-      await tx.payment.update({
-        where: { bookingId: booking.id },
-        data: {
-          status: "SUCCESS",
-          transactionId: `REFUND_${Date.now()}`,
-        },
-      });
+    if (booking.status !== "CONFIRMED") {
+      throw new Error("Only confirmed bookings can be cancelled");
     }
 
- 
-    const seatRestoreMap = [
-      { id: booking.busId, model: tx.bus },
-      { id: booking.trainId, model: tx.train },
-      
-    ];
+    /* =========================
+       GET PAYMENT
+    ========================= */
 
-    for (const { id, model } of seatRestoreMap) {
-      if (id) {
-        await model.update({
-          where: { id },
-          data: { seats: { increment: 1 } },
+    const payment = await tx.payment.findUnique({
+      where: { bookingId },
+    });
+
+    if (!payment || payment.status !== "SUCCESS") {
+      throw new Error("Valid payment not found");
+    }
+
+    const paymentId = payment.transactionId;
+
+    if (!paymentId) {
+      throw new Error("Missing Razorpay payment ID");
+    }
+
+    /* =========================
+       REFUND CALCULATION
+    ========================= */
+
+    const journeyTime =
+      booking.createdAt || new Date(Date.now() + 48 * 60 * 60 * 1000);
+
+    const hoursLeft =
+      (new Date(journeyTime) - new Date()) / (1000 * 60 * 60);
+
+    let refundAmount = 0;
+
+    if (hoursLeft > 24) {
+      refundAmount = booking.totalPrice; // full
+    } else if (hoursLeft > 12) {
+      refundAmount = booking.totalPrice * 0.5; // half
+    } else {
+      refundAmount = 0; // no refund
+    }
+
+    /* =========================
+       RAZORPAY REFUND
+    ========================= */
+
+    let refundResponse = null;
+
+    if (refundAmount > 0) {
+      try {
+        refundResponse = await razorpay.payments.refund(paymentId, {
+          amount: Math.round(refundAmount * 100), // paise
         });
+      } catch (err) {
+        console.error("RAZORPAY REFUND ERROR:", err);
+        throw new Error("Refund failed from Razorpay");
       }
     }
 
-    cancelled = await tx.booking.update({
+    /* =========================
+       RESTORE SEATS
+    ========================= */
+
+    if (booking.flightId) {
+      await tx.flight.update({
+        where: { id: booking.flightId },
+        data: { seats: { increment: 1 } },
+      });
+    }
+
+    if (booking.trainId) {
+      await tx.train.update({
+        where: { id: booking.trainId },
+        data: { seats: { increment: 1 } },
+      });
+    }
+
+    if (booking.busId) {
+      await tx.bus.update({
+        where: { id: booking.busId },
+        data: { seats: { increment: 1 } },
+      });
+    }
+
+    /* =========================
+       UPDATE BOOKING
+    ========================= */
+
+    await tx.booking.update({
       where: { id: bookingId },
       data: { status: "CANCELLED" },
     });
 
-    email = booking.passengerEmail;
+    /* =========================
+       UPDATE PAYMENT STATUS
+    ========================= */
+
+    await tx.payment.update({
+      where: { bookingId },
+      data: {
+        status: refundAmount > 0 ? "REFUNDED" : "SUCCESS",
+      },
+    });
+
+    /* =========================
+       STORE REFUND RECORD
+    ========================= */
+
+    await tx.refund.create({
+      data: {
+        bookingId,
+        amount: refundAmount,
+        status: refundAmount > 0 ? "SUCCESS" : "NO_REFUND",
+      },
+    });
+
+    /* =========================
+       RETURN RESPONSE
+    ========================= */
+
+    return {
+      message: "Booking cancelled successfully",
+      refundAmount,
+      razorpayRefundId: refundResponse?.id || null,
+    };
   });
-
- 
-  if (email) {
-    try {
-      await sendCancellationEmail(email, {
-        ...cancelled,
-        refundAmount,
-      });
-    } catch (err) {
-      console.error("EMAIL ERROR:", err.message);
-    }
-  }
-
-  return {
-    ...cancelled,
-    refundAmount,
-  };
 };
 
 
+
+// ================= REFUND =================
+
 const calculateRefund = (booking) => {
+
   let departure;
 
   if (booking.bus) departure = booking.bus.departure;
   if (booking.train) departure = booking.train.departure;
-  if (booking.flightData) {
-  departure = booking.flightData.departure;
-}
+  if (booking.flight) departure = booking.flight.departure;
+  if (booking.flightData) departure = booking.flightData.departure;
 
   if (!departure) return 0;
 
@@ -264,10 +365,18 @@ const calculateRefund = (booking) => {
 };
 
 
+
+
+console.log("✅ FINAL PRODUCTION SERVICE RUNNING");
+
+// ================= HISTORY =================
+
+
+
 module.exports = {
   createBookingService,
   getBookingHistoryService,
   cancelBookingService,
 };
 
-console.log("✅ NEW SERVICE FILE RUNNING");
+console.log("✅ FINAL PRODUCTION SERVICE RUNNING");

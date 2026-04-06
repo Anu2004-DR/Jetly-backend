@@ -1,31 +1,33 @@
-const { searchFlights } = require("./flight.service");
+const prisma = require("../../config/prisma");
 
-exports.searchFlightsController = async (req, res) => {
+exports.searchFlights = async (req, res) => {
   try {
-    const { from, to, date } = req.body;
+    const { from, to } = req.query;
 
-    if (!from || !to || !date) {
-      return res.status(400).json({
-        message: "from, to, date required"
-      });
-    }
-
-    console.log("📥 Request:", { from, to, date });
-
-    const flights = await searchFlights(from, to, date);
+    const flights = await prisma.flight.findMany({
+      where: {
+        from: {
+          contains: from || "",
+          mode: "insensitive",
+        },
+        to: {
+          contains: to || "",
+          mode: "insensitive",
+        },
+      },
+    });
 
     res.json({
       success: true,
-      count: flights.length,
-      flights
+      flights,
     });
 
-  } catch (error) {
-    console.error("❌ Controller Error:", error.message);
+  } catch (err) {
+    console.error("FLIGHT SEARCH ERROR:", err);
 
     res.status(500).json({
       success: false,
-      message: "Flight search failed"
+      message: "Failed to search flights",
     });
   }
 };

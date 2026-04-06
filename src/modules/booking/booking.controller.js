@@ -6,20 +6,25 @@ const {
   cancelBookingService,
 } = require("./booking.service");
 
-
+/* =========================
+   CREATE BOOKING
+========================= */
 const createBooking = async (req, res) => {
   try {
-    const userId = req.userId; // 🔥 from JWT middleware
+    const userId = req.userId;
 
-    const booking = await createBookingService({
-      ...req.body,
-      userId, // attach owner
-    });
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "User not authenticated",
+      });
+    }
 
-    return res.status(201).json({
+    const booking = await createBookingService(req.body, userId);
+
+    return res.json({
       success: true,
-      message: "Seat locked. Proceed to payment.",
-      data: booking,
+      booking,
     });
 
   } catch (error) {
@@ -27,16 +32,17 @@ const createBooking = async (req, res) => {
 
     return res.status(400).json({
       success: false,
-      message: error.message || "Booking failed",
+      message: error.message,
     });
   }
 };
 
-
-
+/* =========================
+   BOOKING HISTORY
+========================= */
 const getBookingHistory = async (req, res) => {
   try {
-    const userId = req.userId; // 🔥 secure user
+    const userId = req.userId;
 
     const bookings = await getBookingHistoryService(userId);
 
@@ -56,8 +62,9 @@ const getBookingHistory = async (req, res) => {
   }
 };
 
-
-
+/* =========================
+   CANCEL BOOKING + REFUND
+========================= */
 const cancelBooking = async (req, res) => {
   try {
     const bookingId = Number(req.params.id);
@@ -70,7 +77,7 @@ const cancelBooking = async (req, res) => {
       });
     }
 
-    // 🔒 Check ownership
+    // 🔒 Ownership check
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
     });
@@ -93,8 +100,9 @@ const cancelBooking = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Booking cancelled successfully",
-      data: cancelled,
+      message: cancelled.message,
+      refund: cancelled.refundAmount,
+      refundId: cancelled.razorpayRefundId,
     });
 
   } catch (error) {
@@ -102,13 +110,14 @@ const cancelBooking = async (req, res) => {
 
     return res.status(400).json({
       success: false,
-      message: error.message || "Failed to cancel",
+      message: error.message || "Failed to cancel booking",
     });
   }
 };
 
-
-
+/* =========================
+   GET BOOKING BY ID
+========================= */
 const getBookingById = async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -137,13 +146,6 @@ const getBookingById = async (req, res) => {
       });
     }
 
-    //if (booking.userId !== userId) {
-      //return res.status(403).json({
-        //success: false,
-        //message: "Unauthorized access",
-      //});
-    //}
-
     return res.status(200).json({
       success: true,
       data: {
@@ -169,7 +171,9 @@ const getBookingById = async (req, res) => {
   }
 };
 
-
+/* =========================
+   EXPORTS
+========================= */
 module.exports = {
   createBooking,
   getBookingHistory,

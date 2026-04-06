@@ -7,6 +7,163 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model User {
+  id           Int            @id @default(autoincrement())
+  name         String?
+  email        String         @unique
+  password     String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  provider     String         @default("otp")
+  role         String         @default("USER")
+  bookings     Booking[]
+  UserBehavior UserBehavior[]
+
+  @@index([email])
+}
+
+model Bus {
+  id        Int       @id @default(autoincrement())
+  busName   String
+  fromCity  String
+  toCity    String
+  departure String
+  arrival   String
+  price     Float
+  seats     Int
+  createdAt DateTime  @default(now())
+  bookings  Booking[]
+
+  @@index([fromCity, toCity])
+  @@index([departure])
+}
+
+model Train {
+  id          Int       @id @default(autoincrement())
+  trainNumber String
+  trainName   String
+  fromCity    String
+  toCity      String
+  departure   String
+  arrival     String
+  price       Float
+  seats       Int
+  createdAt   DateTime  @default(now())
+  bookings    Booking[]
+
+  @@index([fromCity, toCity])
+  @@index([departure])
+}
+
+model Flight {
+  id        Int       @id @default(autoincrement())
+  flightNo  String?
+  airline   String
+  fromCity  String
+  toCity    String
+  duration  String
+  price     Float
+  seats     Int?
+  createdAt DateTime  @default(now())
+  cachedAt  DateTime  @default(now())
+  searchKey String
+  departure DateTime
+  arrival   DateTime
+  stops     Int
+  bookings  Booking[]
+
+  @@index([fromCity, toCity])
+  @@index([searchKey])
+}
+
+model Booking {
+  id             Int           @id @default(autoincrement())
+  pnr            String        @unique
+  userId         Int
+  bookingType    BookingType
+  busId          Int?
+  trainId        Int?
+  flightId       Int?
+  passengerName  String
+  passengerAge   Int
+  passengerPhone String        @db.VarChar(15)
+  passengerEmail String        @db.VarChar(255)
+  totalPrice     Float
+  priceAtBooking Float
+  status         BookingStatus @default(PENDING_PAYMENT)
+  lockExpiry     DateTime?
+  createdAt      DateTime      @default(now())
+  checkInCount   Int           @default(0)
+  checkedIn      Boolean       @default(false)
+  checkedInAt    DateTime?
+  lastScannedAt  DateTime?
+  flightData     Json?
+  isDeleted      Boolean       @default(false)
+  updatedAt      DateTime      @updatedAt
+
+  bus      Bus?      @relation(fields: [busId], references: [id])
+  flight   Flight?   @relation(fields: [flightId], references: [id])
+  train    Train?    @relation(fields: [trainId], references: [id])
+  user     User      @relation(fields: [userId], references: [id])
+  payment  Payment?
+  scanLogs ScanLog[]
+
+  refunds Refund[] // ✅ ADD THIS
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([pnr])
+}
+
+model Payment {
+  id            Int           @id @default(autoincrement())
+  bookingId     Int           @unique
+  amount        Float
+  transactionId String?
+  createdAt     DateTime      @default(now())
+  status        PaymentStatus
+  booking       Booking       @relation(fields: [bookingId], references: [id])
+
+  @@index([status])
+}
+
+model ScanLog {
+  id        Int      @id @default(autoincrement())
+  bookingId Int
+  scannedBy String
+  result    String
+  reason    String?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  booking   Booking  @relation(fields: [bookingId], references: [id])
+
+  @@index([bookingId])
+}
+
+model Refund {
+  id        Int      @id @default(autoincrement())
+  bookingId Int
+  amount    Float
+  status    String // SUCCESS / FAILED
+  createdAt DateTime @default(now())
+
+  booking Booking @relation(fields: [bookingId], references: [id])
+}
+
+model UserBehavior {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  action    String // SEARCH / CLICK / BOOK
+  metadata  Json
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
 enum BookingType {
   BUS
   TRAIN
@@ -22,193 +179,8 @@ enum BookingStatus {
 }
 
 enum PaymentStatus {
-  PENDING
   SUCCESS
   FAILED
+  PENDING
   REFUNDED
-}
-
-
-
-model User {
-  id        Int      @id @default(autoincrement())
-  name      String?
-  email     String   @unique
-  password  String?
-
-  provider  String   @default("otp") 
-  role      String   @default("USER") // USER | ADMIN
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  bookings  Booking[]
-
-  @@index([email])
-}
-
-
-
-model Bus {
-  id        Int      @id @default(autoincrement())
-  busName   String
-  fromCity  String
-  toCity    String
-  departure String
-  arrival   String
-
-  price     Float
-  seats     Int
-
-  createdAt DateTime @default(now())
-
-  bookings  Booking[]
-
-  @@index([fromCity, toCity])
-  @@index([departure])
-}
-
-
-
-model Train {
-  id          Int      @id @default(autoincrement())
-  trainNumber String
-  trainName   String
-
-  fromCity    String
-  toCity      String
-
-  departure   String
-  arrival     String
-
-  price       Float
-  seats       Int
-
-  createdAt   DateTime @default(now())
-
-  bookings    Booking[]
-
-  @@index([fromCity, toCity])
-  @@index([departure])
-}
-
-
-model Flight {
-  id        Int      @id @default(autoincrement())
-
-  flightNo  String?
-  airline   String
-
-  fromCity  String
-  toCity    String
-
-  departure DateTime  
-  arrival   DateTime   
-
-  duration  String
-  stops     Int        
-
-  price     Float
-  seats     Int?
-
-  /
-  searchKey String     
-  cachedAt  DateTime   @default(now())
-
-  createdAt DateTime   @default(now())
-
-  bookings  Booking[]
-
-  @@index([fromCity, toCity])
-  @@index([searchKey])
-}
-
-
-
-model Booking {
-  id Int @id @default(autoincrement())
-
-  pnr String @unique
-
-  userId Int
-  user   User @relation(fields: [userId], references: [id])
-
-  bookingType BookingType
-
-  busId Int?
-  trainId Int?
-  flightId Int?
-
-  flightData Json?
-
-  passengerName  String
-  passengerAge   Int
-  passengerPhone String @db.VarChar(15)
-  passengerEmail String @db.VarChar(255)
-
-  totalPrice Float
-  priceAtBooking Float   
-
-  status BookingStatus @default(PENDING_PAYMENT)
-
-  lockExpiry DateTime?  
-
-  checkedIn     Boolean   @default(false)
-  checkedInAt   DateTime?
-  checkInCount  Int       @default(0)
-  lastScannedAt DateTime?
-
-  isDeleted Boolean @default(false)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  bus    Bus?    @relation(fields: [busId], references: [id])
-  train  Train?  @relation(fields: [trainId], references: [id])
-  flight Flight? @relation(fields: [flightId], references: [id])
-
-  payment Payment?
-  scanLogs ScanLog[]
-
-  @@index([userId])
-  @@index([status])
-  @@index([createdAt])
-  @@index([pnr])
-  @@index([busId])
-  @@index([trainId])
-  @@index([flightId])
-}
-
-
-model Payment {
-  id Int @id @default(autoincrement())
-
-  bookingId Int @unique
-  amount Float
-
-  status PaymentStatus
-  transactionId String?
-
-  createdAt DateTime @default(now())
-
-  booking Booking @relation(fields: [bookingId], references: [id])
-
-  @@index([status])
-}
-
-
-model ScanLog {
-  id          Int      @id @default(autoincrement())
-  bookingId   Int
-  booking     Booking  @relation(fields: [bookingId], references: [id])
-
-  scannedBy   String
-  result      String
-  reason      String?
-  ipAddress   String?
-  userAgent   String?
-
-  createdAt   DateTime @default(now())
-
-  @@index([bookingId])
 }

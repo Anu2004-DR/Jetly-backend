@@ -63,13 +63,13 @@ const verifyPaymentService = async ({
       });
 
       await tx.payment.create({
-        data: {
-          bookingId,
-          amount: booking.totalPrice,
-          status: "SUCCESS",
-          transactionId: transactionId || null,
-        },
-      });
+  data: {
+    bookingId,
+    amount: booking.totalPrice,
+    status: "SUCCESS",
+    transactionId: razorpay_payment_id, T
+  },
+});
 
       return;
     }
