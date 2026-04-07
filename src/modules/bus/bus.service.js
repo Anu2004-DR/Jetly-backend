@@ -1,18 +1,21 @@
 const prisma = require("../../config/prisma");
-const searchBuses = async (from, to, date) => {
-  return [
-    {
-      id: "bus_1",
-      type: "BUS",
-      provider: "MOCK",
-      from,
-      to,
-      departureTime: `${date}T22:00:00`,
-      arrivalTime: `${date}T06:00:00`,
-      price: 800,
-      name: "VRL Travels"
+
+/* ==============================
+   SEARCH BUSES SERVICE
+============================== */
+const searchBuses = async (from, to) => {
+  return prisma.bus.findMany({
+    where: {
+      fromCity: {
+        contains: from,
+        mode: "insensitive"
+      },
+      toCity: {
+        contains: to,
+        mode: "insensitive"
+      }
     }
-  ];
+  });
 };
 
 module.exports = { searchBuses };

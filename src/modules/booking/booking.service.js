@@ -2,14 +2,9 @@
 
 const prisma = require("../../config/prisma");
 const crypto = require("crypto");
-const { v4: uuidv4 } = require("uuid");
-const { sendCancellationEmail } = require("../../utils/email");
 const razorpay = require("../payment/razorpay");
 
-
 const LOCK_TIME_MINUTES = 5;
-
-const CANCELLABLE_STATUSES = ["PENDING_PAYMENT", "CONFIRMED"];
 
 const cleanPrice = (price) =>
   parseFloat(String(price).replace(/[^0-9.]/g, "")) || 0;
@@ -25,10 +20,8 @@ const generatePNR = () =>
 
 const createBookingService = async (data, userId) => {
 
-  const type = data.bookingType?.toUpperCase(); // ✅ IMPORTANT FIX
+  const type = data.bookingType?.toUpperCase();
   const { entityId, offer } = data;
-
-  console.log("BOOKING DATA:", data); // 🔍 DEBUG
 
   if (!type) throw new Error("Booking type required");
 
@@ -45,7 +38,6 @@ const createBookingService = async (data, userId) => {
   let bookingData = {
     userId,
     bookingType: type,
-    pnr: generatePNR(),
     passengerName: data.passengerName || "Guest",
     passengerAge: data.passengerAge || 21,
     passengerPhone: data.passengerPhone,
@@ -58,50 +50,35 @@ const createBookingService = async (data, userId) => {
 
     // ================= BUS =================
     if (type === "BUS") {
+      if (!entityId) throw new Error("Bus ID required");
 
-  if (!entityId) throw new Error("Bus ID required");
+      const bus = await tx.bus.findUnique({ where: { id: entityId } });
 
-  const bus = await tx.bus.findUnique({
-    where: { id: entityId }
-  });
+      if (!bus) throw new Error("Bus not found");
+      if (bus.seats <= 0) throw new Error("No seats available");
 
-  if (!bus) throw new Error("Bus not found");
+      price = Number(bus.price);
+      if (!price || price <= 0) throw new Error("Invalid price");
 
-  if (bus.seats <= 0) {
-    throw new Error("No seats available");
-  }
-
-  // ✅ FIRST assign price
-  price = Number(bus.price);
-
-  // ✅ THEN validate
-  if (!price || isNaN(price) || price <= 0) {
-    throw new Error("Invalid price");
-  }
-
-  await tx.bus.update({
-    where: { id: entityId },
-    data: { seats: { decrement: 1 } }
-  });
-
-  bookingData.busId = entityId;
-}
-    // ================= TRAIN =================
-    if (type === "TRAIN") {
-
-      if (!entityId) throw new Error("Train ID required");
-
-      const train = await tx.train.findUnique({
-        where: { id: entityId }
+      await tx.bus.update({
+        where: { id: entityId },
+        data: { seats: { decrement: 1 } }
       });
 
+      bookingData.busId = entityId;
+    }
+
+    // ================= TRAIN =================
+    if (type === "TRAIN") {
+      if (!entityId) throw new Error("Train ID required");
+
+      const train = await tx.train.findUnique({ where: { id: entityId } });
+
       if (!train) throw new Error("Train not found");
+      if (train.seats <= 0) throw new Error("No seats available");
 
-      if (train.seats <= 0) {
-        throw new Error("No seats available");
-      }
-
-      price = train.price;
+      price = Number(train.price);
+      if (!price || price <= 0) throw new Error("Invalid price");
 
       await tx.train.update({
         where: { id: entityId },
@@ -114,19 +91,17 @@ const createBookingService = async (data, userId) => {
     // ================= FLIGHT =================
     if (type === "FLIGHT") {
 
-      // DB MODE
       if (entityId) {
         const flight = await tx.flight.findUnique({
           where: { id: entityId }
         });
 
         if (!flight) throw new Error("Flight not found");
-
-        if (flight.seats !== null && flight.seats <= 0) {
+        if (flight.seats !== null && flight.seats <= 0)
           throw new Error("No seats available");
-        }
 
-        price = flight.price;
+        price = Number(flight.price);
+        if (!price || price <= 0) throw new Error("Invalid price");
 
         if (flight.seats !== null) {
           await tx.flight.update({
@@ -138,10 +113,8 @@ const createBookingService = async (data, userId) => {
         bookingData.flightId = entityId;
       }
 
-      // API MODE
       else if (offer) {
         price = cleanPrice(offer.price);
-
         if (!price) throw new Error("Invalid offer price");
 
         bookingData.flightData = offer;
@@ -150,11 +123,6 @@ const createBookingService = async (data, userId) => {
       else {
         throw new Error("Flight data required");
       }
-    }
-
-    // FINAL PRICE CHECK (🔥 FIX)
-    if (!price || price <= 0) {
-      throw new Error("Invalid price");
     }
 
     bookingData.totalPrice = price;
@@ -172,7 +140,6 @@ const createBookingService = async (data, userId) => {
 // ================= HISTORY =================
 
 const getBookingHistoryService = async (userId) => {
-
   if (!userId) throw new Error("User ID required");
 
   return prisma.booking.findMany({
@@ -187,39 +154,28 @@ const getBookingHistoryService = async (userId) => {
 };
 
 
-// ================= CANCEL =================
-
-
-
-/* =========================
-   CANCEL + REFUND SERVICE
-========================= */
+// ================= CANCEL + REFUND =================
 
 const cancelBookingService = async (bookingId) => {
-  return await prisma.$transaction(async (tx) => {
 
-    /* =========================
-       GET BOOKING
-    ========================= */
+  return await prisma.$transaction(async (tx) => {
 
     const booking = await tx.booking.findUnique({
       where: { id: bookingId },
+      include: { bus: true, train: true, flight: true }
     });
 
     if (!booking) throw new Error("Booking not found");
 
     if (booking.status === "CANCELLED") {
-      throw new Error("Booking already cancelled");
+      throw new Error("Already cancelled");
     }
 
     if (booking.status !== "CONFIRMED") {
       throw new Error("Only confirmed bookings can be cancelled");
     }
 
-    /* =========================
-       GET PAYMENT
-    ========================= */
-
+    // ================= GET PAYMENT =================
     const payment = await tx.payment.findUnique({
       where: { bookingId },
     });
@@ -230,51 +186,39 @@ const cancelBookingService = async (bookingId) => {
 
     const paymentId = payment.transactionId;
 
-    if (!paymentId) {
-      throw new Error("Missing Razorpay payment ID");
-    }
+    // ================= GET JOURNEY TIME =================
+    let departure;
 
-    /* =========================
-       REFUND CALCULATION
-    ========================= */
+    if (booking.bus) departure = booking.bus.departure;
+    if (booking.train) departure = booking.train.departure;
+    if (booking.flight) departure = booking.flight.departure;
+    if (booking.flightData) departure = booking.flightData.departure;
 
-    const journeyTime =
-      booking.createdAt || new Date(Date.now() + 48 * 60 * 60 * 1000);
-
-    const hoursLeft =
-      (new Date(journeyTime) - new Date()) / (1000 * 60 * 60);
+    const diffHours =
+      departure
+        ? (new Date(departure) - new Date()) / 36e5
+        : 0;
 
     let refundAmount = 0;
 
-    if (hoursLeft > 24) {
-      refundAmount = booking.totalPrice; // full
-    } else if (hoursLeft > 12) {
-      refundAmount = booking.totalPrice * 0.5; // half
-    } else {
-      refundAmount = 0; // no refund
-    }
+    if (diffHours > 24) refundAmount = booking.totalPrice;
+    else if (diffHours > 12) refundAmount = booking.totalPrice * 0.5;
 
-    /* =========================
-       RAZORPAY REFUND
-    ========================= */
-
+    // ================= RAZORPAY REFUND =================
     let refundResponse = null;
 
     if (refundAmount > 0) {
       try {
         refundResponse = await razorpay.payments.refund(paymentId, {
-          amount: Math.round(refundAmount * 100), // paise
+          amount: Math.round(refundAmount * 100),
         });
       } catch (err) {
-        console.error("RAZORPAY REFUND ERROR:", err);
-        throw new Error("Refund failed from Razorpay");
+        console.error("REFUND ERROR:", err);
+        throw new Error("Refund failed");
       }
     }
 
-    /* =========================
-       RESTORE SEATS
-    ========================= */
-
+    // ================= RESTORE SEATS =================
     if (booking.flightId) {
       await tx.flight.update({
         where: { id: booking.flightId },
@@ -296,18 +240,11 @@ const cancelBookingService = async (bookingId) => {
       });
     }
 
-    /* =========================
-       UPDATE BOOKING
-    ========================= */
-
+    // ================= UPDATE BOOKING =================
     await tx.booking.update({
       where: { id: bookingId },
       data: { status: "CANCELLED" },
     });
-
-    /* =========================
-       UPDATE PAYMENT STATUS
-    ========================= */
 
     await tx.payment.update({
       where: { bookingId },
@@ -315,10 +252,6 @@ const cancelBookingService = async (bookingId) => {
         status: refundAmount > 0 ? "REFUNDED" : "SUCCESS",
       },
     });
-
-    /* =========================
-       STORE REFUND RECORD
-    ========================= */
 
     await tx.refund.create({
       data: {
@@ -328,10 +261,6 @@ const cancelBookingService = async (bookingId) => {
       },
     });
 
-    /* =========================
-       RETURN RESPONSE
-    ========================= */
-
     return {
       message: "Booking cancelled successfully",
       refundAmount,
@@ -340,38 +269,16 @@ const cancelBookingService = async (bookingId) => {
   });
 };
 
+function computeRefund(totalPrice, departureTime) {
+  const hours = (new Date(departureTime) - new Date()) / 36e5;
 
-
-// ================= REFUND =================
-
-const calculateRefund = (booking) => {
-
-  let departure;
-
-  if (booking.bus) departure = booking.bus.departure;
-  if (booking.train) departure = booking.train.departure;
-  if (booking.flight) departure = booking.flight.departure;
-  if (booking.flightData) departure = booking.flightData.departure;
-
-  if (!departure) return 0;
-
-  const diffHours =
-    (new Date(departure) - new Date()) / (1000 * 60 * 60);
-
-  if (diffHours > 24) return booking.totalPrice;
-  if (diffHours > 2) return booking.totalPrice * 0.5;
+  if (hours > 24) return totalPrice;
+  if (hours > 2) return totalPrice * 0.5;
 
   return 0;
-};
+}
 
-
-
-
-console.log("✅ FINAL PRODUCTION SERVICE RUNNING");
-
-// ================= HISTORY =================
-
-
+// ================= EXPORT =================
 
 module.exports = {
   createBookingService,

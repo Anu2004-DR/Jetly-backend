@@ -5,17 +5,17 @@ exports.searchFlights = async (req, res) => {
     const { from, to } = req.query;
 
     const flights = await prisma.flight.findMany({
-      where: {
-        from: {
-          contains: from || "",
-          mode: "insensitive",
-        },
-        to: {
-          contains: to || "",
-          mode: "insensitive",
-        },
-      },
-    });
+  where: {
+    fromCity: {
+      contains: from || "",
+      mode: "insensitive"
+    },
+    toCity: {
+      contains: to || "",
+      mode: "insensitive"
+    }
+  }
+});
 
     res.json({
       success: true,

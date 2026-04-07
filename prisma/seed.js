@@ -84,30 +84,29 @@ async function main() {
 
   
   await prisma.train.createMany({
-    data: [
-      {
-        trainNumber: "12627",
-        trainName: "Karnataka Express",
-        fromCity: "BLR",
-        toCity: "HYD",
-        departure: "19:20",
-        arrival: "07:00",
-        price: 900,
-        seats: 120
-      },
-      {
-        trainNumber: "12007",
-        trainName: "Shatabdi Express",
-        fromCity: "BLR",
-        toCity: "MAA",
-        departure: "06:00",
-        arrival: "10:45",
-        price: 1100,
-        seats: 100
-      }
-    ],
-    skipDuplicates: true
-  });
+  data: [
+    {
+      trainNumber: "12627",
+      trainName: "Karnataka Express",
+      fromCity: "Bangalore",
+      toCity: "Hyderabad",
+      departure: "19:20",
+      arrival: "07:00",
+      price: 900,
+      seats: 120
+    },
+    {
+      trainNumber: "12007",
+      trainName: "Shatabdi Express",
+      fromCity: "Bangalore",
+      toCity: "Chennai",
+      departure: "06:00",
+      arrival: "10:45",
+      price: 1100,
+      seats: 100
+    }
+  ],skipDuplicates: true
+});
 
   console.log("🌱 Database seeded successfully!");
 }

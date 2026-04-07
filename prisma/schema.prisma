@@ -153,17 +153,14 @@ model Refund {
 }
 
 model UserBehavior {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  action    String // SEARCH / CLICK / BOOK
-  metadata  Json
-  createdAt DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id])
-
-  @@index([userId])
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  type        String   // flight/bus/train
+  source      String
+  destination String
+  price       Float
+  createdAt   DateTime @default(now())
 }
-
 enum BookingType {
   BUS
   TRAIN

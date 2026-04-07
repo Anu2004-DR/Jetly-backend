@@ -6,9 +6,7 @@ const {
   cancelBookingService,
 } = require("./booking.service");
 
-/* =========================
-   CREATE BOOKING
-========================= */
+
 const createBooking = async (req, res) => {
   try {
     const userId = req.userId;
@@ -20,29 +18,44 @@ const createBooking = async (req, res) => {
       });
     }
 
+    if (!req.body.bookingType) {
+      return res.status(400).json({
+        success: false,
+        message: "Booking type required",
+      });
+    }
+
     const booking = await createBookingService(req.body, userId);
 
-    return res.json({
+    return res.status(201).json({
       success: true,
-      booking,
+      bookingId: booking.id,
+      status: booking.status,
+      data: booking,
     });
 
   } catch (error) {
-    console.error("BOOKING ERROR:", error);
+    console.error("BOOKING ERROR:", error.message, error.stack);
 
     return res.status(400).json({
       success: false,
-      message: error.message,
+      message: error.message || "Failed to create booking",
     });
   }
 };
-
 /* =========================
    BOOKING HISTORY
 ========================= */
 const getBookingHistory = async (req, res) => {
   try {
     const userId = req.userId;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
 
     const bookings = await getBookingHistoryService(userId);
 
@@ -53,7 +66,7 @@ const getBookingHistory = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("BOOKING HISTORY ERROR:", error);
+    console.error("BOOKING HISTORY ERROR:", error.message, error.stack);
 
     return res.status(500).json({
       success: false,
@@ -77,7 +90,6 @@ const cancelBooking = async (req, res) => {
       });
     }
 
-    // 🔒 Ownership check
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
     });
@@ -89,10 +101,19 @@ const cancelBooking = async (req, res) => {
       });
     }
 
+    // 🔒 Ownership check
     if (booking.userId !== userId) {
       return res.status(403).json({
         success: false,
         message: "Unauthorized: Not your booking",
+      });
+    }
+
+    // ❗ Status validation
+    if (booking.status !== "CONFIRMED") {
+      return res.status(400).json({
+        success: false,
+        message: "Only confirmed bookings can be cancelled",
       });
     }
 
@@ -106,7 +127,7 @@ const cancelBooking = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("CANCEL ERROR:", error);
+    console.error("CANCEL ERROR:", error.message, error.stack);
 
     return res.status(400).json({
       success: false,
@@ -146,11 +167,22 @@ const getBookingById = async (req, res) => {
       });
     }
 
+    // 🔒 Ownership check
+    if (booking.userId !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized access",
+      });
+    }
+
     return res.status(200).json({
       success: true,
       data: {
         id: booking.id,
-        pnr: booking.pnr || "PENDING",
+        pnr:
+          booking.status === "CONFIRMED"
+            ? booking.pnr
+            : null,
         passengerName: booking.passengerName,
         bookingType: booking.bookingType,
         totalPrice: booking.totalPrice,
@@ -162,7 +194,7 @@ const getBookingById = async (req, res) => {
     });
 
   } catch (err) {
-    console.error("GET BOOKING ERROR:", err);
+    console.error("GET BOOKING ERROR:", err.message, err.stack);
 
     return res.status(500).json({
       success: false,
