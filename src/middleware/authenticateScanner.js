@@ -19,6 +19,7 @@ const jwt = require("jsonwebtoken");
 // ─────────────────────────────────────────────────────────────────
 
 const authenticateScanner = (req, res, next) => {
+  
   const authHeader = req.headers["authorization"];
 
   if (!authHeader?.startsWith("Bearer ")) {

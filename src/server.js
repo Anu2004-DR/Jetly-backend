@@ -50,8 +50,8 @@ const recommendationRoutes = require("./routes/recommendation.routes");
 const validationRoutes = require("./routes/validation.routes");
 const searchRoutes = require("./modules/search/search.routes");
 const behaviorRoutes = require("./routes/behavior.routes");
-
-
+const locationRoutes = require("./routes/location.routes");
+const locationRoutes = require("./modules/location/location.routes");
 
 /* =========================
    HEALTH CHECK
@@ -82,6 +82,11 @@ app.use("/api", recommendationRoutes);
 app.use("/api/validate", validationRoutes);
 app.use("/api/search", searchRoutes);
 app.use("/api/behavior", behaviorRoutes);
+app.use("/api/location", locationRoutes);
+
+
+app.use("/api/location", locationRoutes);
+
 /* =========================
    TEST ROUTES
 ========================= */

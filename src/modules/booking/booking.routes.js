@@ -9,16 +9,13 @@ const {
   getBookingById,
 } = require("./booking.controller");
 
-//router.get("/history", getBookingHistory);
 
-
-
-
-router.post("/", createBooking);
+router.post("/", authMiddleware, createBooking);
 
 router.get("/history", authMiddleware, getBookingHistory);
-router.get("/:id", getBookingById);
 
-router.post("/cancel/:id", cancelBooking);
+router.get("/:id", authMiddleware, getBookingById);
+
+router.post("/cancel/:id", authMiddleware, cancelBooking);
 
 module.exports = router;
