@@ -1,33 +1,37 @@
 const jwt = require("jsonwebtoken");
 
-
-
 const authMiddleware = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader) {
-    return res.status(401).json({
-      message: "Authorization token missing"
-    });
-  }
-
-  const token = authHeader.split(" ")[1];
-
   try {
+    const authHeader = req.headers.authorization;
+
+    console.log("AUTH HEADER:", authHeader);
+
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({
+        message: "Authorization token missing",
+      });
+    }
+
+    const token = authHeader.split(" ")[1];
+
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    req.userId = decoded.id || decoded.userId;
+    console.log("DECODED:", decoded);
+
+    req.userId = decoded.userId || decoded.id;
 
     if (!req.userId) {
       return res.status(401).json({
-        message: "Invalid token payload"
+        message: "Invalid token payload",
       });
     }
 
     next();
   } catch (error) {
-    res.status(401).json({
-      message: "Invalid or expired token"
+    console.log("JWT ERROR:", error.message);
+
+    return res.status(401).json({
+      message: "Invalid or expired token",
     });
   }
 };
