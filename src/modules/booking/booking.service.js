@@ -36,6 +36,7 @@ const createBookingService = async (data, userId) => {
   let price = 0;
 
   let bookingData = {
+    pnr: generatePNR(),
     userId,
     bookingType: type,
     passengerName: data.passengerName || "Guest",
