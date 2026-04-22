@@ -52,10 +52,9 @@ const searchRoutes = require("./modules/search/search.routes");
 const behaviorRoutes = require("./routes/behavior.routes");
 
 const locationRoutes = require("./modules/location/location.routes");
+const verifyRoutes = require("./routes/verifyRoutes");
 
-/* =========================
-   HEALTH CHECK
-========================= */
+
 
 app.get("/", (req, res) => {
   res.json({ message: "Travel Platform API Running 🚀" });
@@ -83,13 +82,8 @@ app.use("/api/validate", validationRoutes);
 app.use("/api/search", searchRoutes);
 app.use("/api/behavior", behaviorRoutes);
 app.use("/api/location", locationRoutes);
+app.use("/api/verify", verifyRoutes);
 
-
-
-
-/* =========================
-   TEST ROUTES
-========================= */
 
 app.post("/api/booking-test", (req, res) => {
   console.log("✅ TEST BOOKING HIT");
