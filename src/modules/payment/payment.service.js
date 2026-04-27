@@ -25,13 +25,6 @@ const normalizeTicketData = (booking) => {
           date: booking.createdAt,
           time: booking.bus.departure,
         }
-      : booking.flightData
-      ? {
-          fromCity: booking.flightData.from,
-          toCity: booking.flightData.to,
-          date: booking.flightData.departure || booking.createdAt,
-          time: booking.flightData.departure || "",
-        }
       : {
           fromCity: "N/A",
           toCity: "N/A",
@@ -78,38 +71,17 @@ const verifyPaymentService = async ({
   paymentStatus,
   transactionId,
 }) => {
-  if (!bookingId) {
-    throw new Error("Booking ID required");
-  }
+  if (!bookingId) throw new Error("Booking ID required");
 
   let result;
 
   await prisma.$transaction(async (tx) => {
     const booking = await tx.booking.findUnique({
       where: { id: bookingId },
-      include: {
-        bus: true,
-        train: true,
-        flight: true,
-      },
+      include: { bus: true, train: true, flight: true },
     });
 
-    if (!booking) {
-      throw new Error("Booking not found");
-    }
-
-    if (booking.status === "CONFIRMED" && paymentStatus === "SUCCESS") {
-      result = normalizeTicketData(booking);
-      return;
-    }
-
-    if (booking.status === "CANCELLED" || booking.status === "EXPIRED") {
-      throw new Error("Booking is no longer payable");
-    }
-
-    if (booking.lockExpiry && new Date() > booking.lockExpiry) {
-      throw new Error("Booking expired. Please try again.");
-    }
+    if (!booking) throw new Error("Booking not found");
 
     if (paymentStatus === "FAILED") {
       await releaseSeats(tx, booking);
@@ -119,35 +91,14 @@ const verifyPaymentService = async ({
         data: { status: "FAILED" },
       });
 
-      await tx.payment.upsert({
-        where: { bookingId },
-        update: {
-          amount: booking.totalPrice,
-          status: "FAILED",
-          transactionId: transactionId || null,
-        },
-        create: {
-          bookingId,
-          amount: booking.totalPrice,
-          status: "FAILED",
-          transactionId: transactionId || null,
-        },
-      });
-
-      result = { message: "Payment failed. Seat released." };
+      result = { message: "Payment failed" };
       return;
     }
 
     const confirmedBooking = await tx.booking.update({
       where: { id: bookingId },
-      data: {
-        status: "CONFIRMED",
-      },
-      include: {
-        bus: true,
-        train: true,
-        flight: true,
-      },
+      data: { status: "CONFIRMED" },
+      include: { bus: true, train: true, flight: true },
     });
 
     await tx.payment.upsert({
@@ -171,9 +122,13 @@ const verifyPaymentService = async ({
   if (paymentStatus === "SUCCESS" && result?.passengerEmail) {
     try {
       const filePath = await generateTicketPDF(result);
-      await sendTicketEmail(result.passengerEmail, result, filePath);
+      await sendTicketEmail(
+        result.passengerEmail,
+        result,
+        filePath
+      );
     } catch (err) {
-      console.error("❌ Email/PDF error:", err.message);
+      console.error("PDF/Email Error:", err.message);
     }
   }
 
