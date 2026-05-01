@@ -5,9 +5,6 @@ const razorpay = require("./razorpay");
 const crypto = require("crypto");
 const { verifyPaymentService } = require("./payment.service");
 
-/* =========================
-   CREATE ORDER (FINAL)
-========================= */
 exports.createOrder = async (req, res) => {
   try {
     const userId = req.userId;
@@ -31,7 +28,7 @@ exports.createOrder = async (req, res) => {
       });
     }
 
-    // 🔒 Ownership check
+   
     if (booking.userId !== userId) {
       return res.status(403).json({
         success: false,
@@ -47,7 +44,7 @@ exports.createOrder = async (req, res) => {
       });
     }
 
-    // ❗ Validate amount
+    
     const amount = Math.round(Number(booking.totalPrice) * 100);
     if (!amount || amount <= 0) {
       return res.status(400).json({
@@ -119,7 +116,6 @@ exports.verifyPayment = async (req, res) => {
       });
     }
 
-    // ✅ IDEMPOTENCY
     if (booking.status === "CONFIRMED") {
       return res.json({ success: true, already: true });
     }
@@ -160,9 +156,7 @@ exports.verifyPayment = async (req, res) => {
 };
 
 
-/* =========================
-   PAYMENT FAILED HANDLER
-========================= */
+
 exports.markPaymentFailed = async (req, res) => {
   try {
     const { bookingId } = req.body;
