@@ -52,6 +52,7 @@ const searchRoutes = require("./modules/search/search.routes");
 const behaviorRoutes = require("./routes/behavior.routes");
 
 const locationRoutes = require("./modules/location/location.routes");
+
 const verifyRoutes = require("./routes/verifyRoutes");
 
 

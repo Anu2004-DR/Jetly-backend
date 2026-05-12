@@ -1,11 +1,12 @@
 const express = require("express");
+
 const router = express.Router();
 
 const {
-  searchFlights,   // make sure this exists
+  searchFlights,
 } = require("./flight.controller");
 
-// ✅ ADD THIS
+// GET /api/flights/search
 router.get("/search", searchFlights);
 
 module.exports = router;

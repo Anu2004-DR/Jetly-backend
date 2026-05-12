@@ -1,33 +1,55 @@
-const prisma = require("../../config/prisma");
+const {
+  searchFlightsService,
+} = require("./flight.service");
 
-exports.searchFlights = async (req, res) => {
+const searchFlights = async (req, res) => {
   try {
-    const { from, to } = req.query;
 
-    const flights = await prisma.flight.findMany({
-  where: {
-    fromCity: {
-      contains: from || "",
-      mode: "insensitive"
-    },
-    toCity: {
-      contains: to || "",
-      mode: "insensitive"
+    const {
+      origin,
+      destination,
+      departureDate,
+      adults = 1,
+    } = req.query;
+
+    // Validation
+    if (!origin || !destination || !departureDate) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "origin, destination and departureDate are required",
+      });
     }
-  }
-});
 
-    res.json({
+    const flights =
+      await searchFlightsService({
+        origin,
+        destination,
+        departureDate,
+        adults,
+      });
+
+    return res.json({
       success: true,
-      flights,
+      count: flights.length,
+      data: flights,
     });
 
-  } catch (err) {
-    console.error("FLIGHT SEARCH ERROR:", err);
+  } catch (error) {
 
-    res.status(500).json({
-      success: false,
-      message: "Failed to search flights",
-    });
-  }
+  console.log("========== FULL ERROR ==========");
+  console.dir(error, { depth: null });
+  console.log("================================");
+
+  return res.status(500).json({
+    success: false,
+    message: error?.message || "Unknown error",
+    statusCode: error?.response?.statusCode || null,
+    amadeusError: error?.response?.result || null,
+  });
+}
+};
+
+module.exports = {
+  searchFlights,
 };
