@@ -95,6 +95,39 @@ app.get("/api/recommendations-test", (req, res) => {
   res.json({ ok: true });
 });
 
+
+app.get("/api/test-token", async (req, res) => {
+  try {
+
+    const axios = require("axios");
+
+    const response = await axios.post(
+      "https://test.api.amadeus.com/v1/security/oauth2/token",
+      new URLSearchParams({
+        grant_type: "client_credentials",
+        client_id: process.env.AMADEUS_CLIENT_ID,
+        client_secret: process.env.AMADEUS_CLIENT_SECRET,
+      }),
+      {
+        headers: {
+          "Content-Type":
+            "application/x-www-form-urlencoded",
+        },
+      }
+    );
+
+    res.json(response.data);
+
+  } catch (err) {
+
+    console.error(err?.response?.data || err);
+
+    res.status(500).json({
+      error: err?.response?.data || err.message,
+    });
+  }
+});
+
 /* =========================
    404 HANDLER
 ========================= */

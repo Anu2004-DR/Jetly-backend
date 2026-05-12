@@ -6,26 +6,134 @@ const razorpay = require("../payment/razorpay");
 
 const LOCK_TIME_MINUTES = 5;
 
+/* =========================
+   HELPERS
+========================= */
+
 const cleanPrice = (price) =>
   parseFloat(String(price).replace(/[^0-9.]/g, "")) || 0;
 
 const isValidEmail = (email) =>
   /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
+const isValidPhone = (phone) =>
+  /^[6-9]\d{9}$/.test(String(phone));
+
 const generatePNR = () =>
   "PNR" + crypto.randomBytes(5).toString("hex").toUpperCase();
 
+const computeRefund = (totalPrice, departureTime) => {
+  const hours =
+    (new Date(departureTime) - new Date()) / 36e5;
 
-// ================= CREATE BOOKING =================
+  if (hours > 24) return totalPrice;
 
-const createBookingService = async (data, userId) => {
+  if (hours > 12) return totalPrice * 0.5;
 
-  const type = data.bookingType?.toUpperCase();
+  return 0;
+};
+
+/* =========================
+   RELEASE EXPIRED BOOKINGS
+========================= */
+
+const releaseExpiredBookings = async (tx) => {
+  const expiredBookings = await tx.booking.findMany({
+    where: {
+      status: "PENDING_PAYMENT",
+      lockExpiry: {
+        lt: new Date(),
+      },
+    },
+  });
+
+  for (const booking of expiredBookings) {
+
+    if (booking.flightId) {
+      await tx.flight.update({
+        where: { id: booking.flightId },
+        data: {
+          seats: {
+            increment: 1,
+          },
+        },
+      });
+    }
+
+    if (booking.trainId) {
+      await tx.train.update({
+        where: { id: booking.trainId },
+        data: {
+          seats: {
+            increment: 1,
+          },
+        },
+      });
+    }
+
+    if (booking.busId) {
+      await tx.bus.update({
+        where: { id: booking.busId },
+        data: {
+          seats: {
+            increment: 1,
+          },
+        },
+      });
+    }
+
+    await tx.booking.update({
+      where: { id: booking.id },
+      data: {
+        status: "EXPIRED",
+      },
+    });
+  }
+};
+
+/* =========================
+   GENERATE UNIQUE PNR
+========================= */
+
+const generateUniquePNR = async (tx) => {
+  let pnr;
+  let exists = true;
+
+  while (exists) {
+
+    pnr = generatePNR();
+
+    const existing = await tx.booking.findUnique({
+      where: { pnr },
+    });
+
+    exists = !!existing;
+  }
+
+  return pnr;
+};
+
+/* =========================
+   CREATE BOOKING
+========================= */
+
+const createBookingService = async (
+  data,
+  userId
+) => {
+
+  const type =
+    data.bookingType?.toUpperCase();
+
   const { entityId, offer } = data;
 
-  if (!type) throw new Error("Booking type required");
+  if (!type) {
+    throw new Error("Booking type required");
+  }
 
-  if (!["FLIGHT", "TRAIN", "BUS"].includes(type)) {
+  if (
+    !["FLIGHT", "TRAIN", "BUS"].includes(type)
+  ) {
     throw new Error("Invalid booking type");
   }
 
@@ -33,258 +141,482 @@ const createBookingService = async (data, userId) => {
     throw new Error("Invalid email");
   }
 
-  let price = 0;
-
-  let bookingData = {
-    pnr: generatePNR(),
-    userId,
-    bookingType: type,
-    passengerName: data.passengerName || "Guest",
-    passengerAge: data.passengerAge || 21,
-    passengerPhone: data.passengerPhone,
-    passengerEmail: data.passengerEmail,
-    status: "PENDING_PAYMENT",
-    lockExpiry: new Date(Date.now() + LOCK_TIME_MINUTES * 60 * 1000),
-  };
+  if (!isValidPhone(data.passengerPhone)) {
+    throw new Error("Invalid phone number");
+  }
 
   return await prisma.$transaction(async (tx) => {
 
-    // ================= BUS =================
+    // release stale holds first
+    await releaseExpiredBookings(tx);
+
+    let price = 0;
+
+    const bookingData = {
+      pnr: await generateUniquePNR(tx),
+
+      userId,
+
+      bookingType: type,
+
+      passengerName:
+        data.passengerName || "Guest",
+
+      passengerAge:
+        Number(data.passengerAge) || 21,
+
+      passengerPhone: data.passengerPhone,
+
+      passengerEmail: data.passengerEmail,
+
+      status: "PENDING_PAYMENT",
+
+      lockExpiry: new Date(
+        Date.now() +
+        LOCK_TIME_MINUTES * 60 * 1000
+      ),
+    };
+
+    /* =========================
+       BUS
+    ========================= */
+
     if (type === "BUS") {
-      if (!entityId) throw new Error("Bus ID required");
 
-      const bus = await tx.bus.findUnique({ where: { id: entityId } });
-
-      if (!bus) throw new Error("Bus not found");
-      if (bus.seats <= 0) throw new Error("No seats available");
-
-      price = Number(bus.price);
-      if (!price || price <= 0) throw new Error("Invalid price");
-
-      await tx.bus.update({
-        where: { id: entityId },
-        data: { seats: { decrement: 1 } }
-      });
-
-      bookingData.busId = entityId;
-    }
-
-    // ================= TRAIN =================
-    if (type === "TRAIN") {
-      if (!entityId) throw new Error("Train ID required");
-
-      const train = await tx.train.findUnique({ where: { id: entityId } });
-
-      if (!train) throw new Error("Train not found");
-      if (train.seats <= 0) throw new Error("No seats available");
-
-      price = Number(train.price);
-      if (!price || price <= 0) throw new Error("Invalid price");
-
-      await tx.train.update({
-        where: { id: entityId },
-        data: { seats: { decrement: 1 } }
-      });
-
-      bookingData.trainId = entityId;
-    }
-
-    // ================= FLIGHT =================
-    if (type === "FLIGHT") {
-
-      if (entityId) {
-        const flight = await tx.flight.findUnique({
-          where: { id: entityId }
-        });
-
-        if (!flight) throw new Error("Flight not found");
-        if (flight.seats !== null && flight.seats <= 0)
-          throw new Error("No seats available");
-
-        price = Number(flight.price);
-        if (!price || price <= 0) throw new Error("Invalid price");
-
-        if (flight.seats !== null) {
-          await tx.flight.update({
-            where: { id: entityId },
-            data: { seats: { decrement: 1 } }
-          });
-        }
-
-        bookingData.flightId = entityId;
+      if (!entityId) {
+        throw new Error("Bus ID required");
       }
 
+      const bus = await tx.bus.findUnique({
+        where: { id: Number(entityId) },
+      });
+
+      if (!bus) {
+        throw new Error("Bus not found");
+      }
+
+      price = Number(bus.price);
+
+      if (!price || price <= 0) {
+        throw new Error("Invalid bus price");
+      }
+
+      const updatedBus =
+        await tx.bus.updateMany({
+          where: {
+            id: Number(entityId),
+            seats: {
+              gt: 0,
+            },
+          },
+
+          data: {
+            seats: {
+              decrement: 1,
+            },
+          },
+        });
+
+      if (updatedBus.count === 0) {
+        throw new Error("No seats available");
+      }
+
+      bookingData.busId = Number(entityId);
+    }
+
+    /* =========================
+       TRAIN
+    ========================= */
+
+    if (type === "TRAIN") {
+
+      if (!entityId) {
+        throw new Error("Train ID required");
+      }
+
+      const train =
+        await tx.train.findUnique({
+          where: { id: Number(entityId) },
+        });
+
+      if (!train) {
+        throw new Error("Train not found");
+      }
+
+      price = Number(train.price);
+
+      if (!price || price <= 0) {
+        throw new Error("Invalid train price");
+      }
+
+      const updatedTrain =
+        await tx.train.updateMany({
+          where: {
+            id: Number(entityId),
+            seats: {
+              gt: 0,
+            },
+          },
+
+          data: {
+            seats: {
+              decrement: 1,
+            },
+          },
+        });
+
+      if (updatedTrain.count === 0) {
+        throw new Error("No seats available");
+      }
+
+      bookingData.trainId = Number(entityId);
+    }
+
+    /* =========================
+       FLIGHT
+    ========================= */
+
+    if (type === "FLIGHT") {
+
+      // DB flight
+      if (entityId) {
+
+        const flight =
+          await tx.flight.findUnique({
+            where: {
+              id: Number(entityId),
+            },
+          });
+
+        if (!flight) {
+          throw new Error("Flight not found");
+        }
+
+        price = Number(flight.price);
+
+        if (!price || price <= 0) {
+          throw new Error("Invalid flight price");
+        }
+
+        if (flight.seats !== null) {
+
+          const updatedFlight =
+            await tx.flight.updateMany({
+              where: {
+                id: Number(entityId),
+
+                seats: {
+                  gt: 0,
+                },
+              },
+
+              data: {
+                seats: {
+                  decrement: 1,
+                },
+              },
+            });
+
+          if (
+            updatedFlight.count === 0
+          ) {
+            throw new Error(
+              "No seats available"
+            );
+          }
+        }
+
+        bookingData.flightId =
+          Number(entityId);
+      }
+
+      // Live API offer
       else if (offer) {
+
         price = cleanPrice(offer.price);
-        if (!price) throw new Error("Invalid offer price");
+
+        // NEVER trust tiny values
+        if (!price || price < 100) {
+          throw new Error(
+            "Invalid offer price"
+          );
+        }
 
         bookingData.flightData = offer;
       }
 
       else {
-        throw new Error("Flight data required");
+        throw new Error(
+          "Flight data required"
+        );
       }
     }
 
     bookingData.totalPrice = price;
+
     bookingData.priceAtBooking = price;
 
-    const booking = await tx.booking.create({
-      data: bookingData
-    });
+    const booking =
+      await tx.booking.create({
+        data: bookingData,
+      });
 
     return booking;
   });
 };
 
+/* =========================
+   BOOKING HISTORY
+========================= */
 
-// ================= HISTORY =================
+const getBookingHistoryService = async (
+  userId
+) => {
 
-const getBookingHistoryService = async (userId) => {
-  if (!userId) throw new Error("User ID required");
+  if (!userId) {
+    throw new Error("User ID required");
+  }
 
-  return prisma.booking.findMany({
-    where: { userId },
+  return await prisma.booking.findMany({
+    where: {
+      userId,
+      isDeleted: false,
+    },
+
     include: {
       bus: true,
       train: true,
       flight: true,
+      payment: true,
     },
-    orderBy: { createdAt: "desc" },
+
+    orderBy: {
+      createdAt: "desc",
+    },
   });
 };
 
+/* =========================
+   CANCEL BOOKING
+========================= */
 
-// ================= CANCEL + REFUND =================
+const cancelBookingService = async (
+  bookingId
+) => {
 
-const cancelBookingService = async (bookingId) => {
+  return await prisma.$transaction(
+    async (tx) => {
 
-  return await prisma.$transaction(async (tx) => {
+      const booking =
+        await tx.booking.findUnique({
+          where: { id: bookingId },
 
-    const booking = await tx.booking.findUnique({
-      where: { id: bookingId },
-      include: { bus: true, train: true, flight: true }
-    });
-
-    if (!booking) throw new Error("Booking not found");
-
-    if (booking.status === "CANCELLED") {
-      throw new Error("Already cancelled");
-    }
-
-    if (booking.status !== "CONFIRMED") {
-      throw new Error("Only confirmed bookings can be cancelled");
-    }
-
-    // ================= GET PAYMENT =================
-    const payment = await tx.payment.findUnique({
-      where: { bookingId },
-    });
-
-    if (!payment || payment.status !== "SUCCESS") {
-      throw new Error("Valid payment not found");
-    }
-
-    const paymentId = payment.transactionId;
-
-    // ================= GET JOURNEY TIME =================
-    let departure;
-
-    if (booking.bus) departure = booking.bus.departure;
-    if (booking.train) departure = booking.train.departure;
-    if (booking.flight) departure = booking.flight.departure;
-    if (booking.flightData) departure = booking.flightData.departure;
-
-    const diffHours =
-      departure
-        ? (new Date(departure) - new Date()) / 36e5
-        : 0;
-
-    let refundAmount = 0;
-
-    if (diffHours > 24) refundAmount = booking.totalPrice;
-    else if (diffHours > 12) refundAmount = booking.totalPrice * 0.5;
-
-    // ================= RAZORPAY REFUND =================
-    let refundResponse = null;
-
-    if (refundAmount > 0) {
-      try {
-        refundResponse = await razorpay.payments.refund(paymentId, {
-          amount: Math.round(refundAmount * 100),
+          include: {
+            bus: true,
+            train: true,
+            flight: true,
+            payment: true,
+          },
         });
-      } catch (err) {
-        console.error("REFUND ERROR:", err);
-        throw new Error("Refund failed");
+
+      if (!booking) {
+        throw new Error(
+          "Booking not found"
+        );
       }
-    }
 
-    // ================= RESTORE SEATS =================
-    if (booking.flightId) {
-      await tx.flight.update({
-        where: { id: booking.flightId },
-        data: { seats: { increment: 1 } },
+      if (
+        booking.status === "CANCELLED"
+      ) {
+        throw new Error(
+          "Booking already cancelled"
+        );
+      }
+
+      if (
+        booking.status !== "CONFIRMED"
+      ) {
+        throw new Error(
+          "Only confirmed bookings can be cancelled"
+        );
+      }
+
+      const payment =
+        await tx.payment.findUnique({
+          where: { bookingId },
+        });
+
+      if (
+        !payment ||
+        payment.status !== "SUCCESS"
+      ) {
+        throw new Error(
+          "Valid payment not found"
+        );
+      }
+
+      let departure;
+
+      if (booking.bus) {
+        departure =
+          booking.bus.departure;
+      }
+
+      if (booking.train) {
+        departure =
+          booking.train.departure;
+      }
+
+      if (booking.flight) {
+        departure =
+          booking.flight.departure;
+      }
+
+      if (booking.flightData) {
+        departure =
+          booking.flightData.departure;
+      }
+
+      const refundAmount =
+        computeRefund(
+          booking.totalPrice,
+          departure
+        );
+
+      let refundResponse = null;
+
+      /* =========================
+         RAZORPAY REFUND
+      ========================= */
+
+      if (refundAmount > 0) {
+
+        try {
+
+          refundResponse =
+            await razorpay.payments.refund(
+              payment.transactionId,
+              {
+                amount: Math.round(
+                  refundAmount * 100
+                ),
+              }
+            );
+
+        } catch (err) {
+
+          console.error(
+            "REFUND ERROR:",
+            err
+          );
+
+          throw new Error(
+            "Refund failed"
+          );
+        }
+      }
+
+      /* =========================
+         RESTORE SEATS
+      ========================= */
+
+      if (booking.flightId) {
+        await tx.flight.update({
+          where: {
+            id: booking.flightId,
+          },
+
+          data: {
+            seats: {
+              increment: 1,
+            },
+          },
+        });
+      }
+
+      if (booking.trainId) {
+        await tx.train.update({
+          where: {
+            id: booking.trainId,
+          },
+
+          data: {
+            seats: {
+              increment: 1,
+            },
+          },
+        });
+      }
+
+      if (booking.busId) {
+        await tx.bus.update({
+          where: {
+            id: booking.busId,
+          },
+
+          data: {
+            seats: {
+              increment: 1,
+            },
+          },
+        });
+      }
+
+      /* =========================
+         UPDATE BOOKING
+      ========================= */
+
+      await tx.booking.update({
+        where: { id: bookingId },
+
+        data: {
+          status: "CANCELLED",
+        },
       });
-    }
 
-    if (booking.trainId) {
-      await tx.train.update({
-        where: { id: booking.trainId },
-        data: { seats: { increment: 1 } },
+      await tx.payment.update({
+        where: { bookingId },
+
+        data: {
+          status:
+            refundAmount > 0
+              ? "REFUNDED"
+              : "SUCCESS",
+        },
       });
-    }
 
-    if (booking.busId) {
-      await tx.bus.update({
-        where: { id: booking.busId },
-        data: { seats: { increment: 1 } },
+      await tx.refund.create({
+        data: {
+          bookingId,
+
+          amount: refundAmount,
+
+          status:
+            refundAmount > 0
+              ? "SUCCESS"
+              : "NO_REFUND",
+        },
       });
+
+      return {
+        message:
+          "Booking cancelled successfully",
+
+        refundAmount,
+
+        razorpayRefundId:
+          refundResponse?.id || null,
+      };
     }
-
-    // ================= UPDATE BOOKING =================
-    await tx.booking.update({
-      where: { id: bookingId },
-      data: { status: "CANCELLED" },
-    });
-
-    await tx.payment.update({
-      where: { bookingId },
-      data: {
-        status: refundAmount > 0 ? "REFUNDED" : "SUCCESS",
-      },
-    });
-
-    await tx.refund.create({
-      data: {
-        bookingId,
-        amount: refundAmount,
-        status: refundAmount > 0 ? "SUCCESS" : "NO_REFUND",
-      },
-    });
-
-    return {
-      message: "Booking cancelled successfully",
-      refundAmount,
-      razorpayRefundId: refundResponse?.id || null,
-    };
-  });
+  );
 };
 
-function computeRefund(totalPrice, departureTime) {
-  const hours = (new Date(departureTime) - new Date()) / 36e5;
-
-  if (hours > 24) return totalPrice;
-  if (hours > 2) return totalPrice * 0.5;
-
-  return 0;
-}
-
-// ================= EXPORT =================
+/* =========================
+   EXPORTS
+========================= */
 
 module.exports = {
   createBookingService,
   getBookingHistoryService,
   cancelBookingService,
 };
-
-console.log("✅ FINAL PRODUCTION SERVICE RUNNING");

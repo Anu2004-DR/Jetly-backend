@@ -21,8 +21,8 @@ const searchFlights = async (req, res) => {
       });
     }
 
-    const flights =
-      await searchFlightsService({
+    const result =
+  await searchFlightsService     ({
         origin,
         destination,
         departureDate,
@@ -31,8 +31,9 @@ const searchFlights = async (req, res) => {
 
     return res.json({
       success: true,
-      count: flights.length,
-      data: flights,
+      fallback: result.fallback || false,
+count: result.flights.length,
+data: result.flights,
     });
 
   } catch (error) {
