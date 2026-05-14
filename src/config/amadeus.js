@@ -1,10 +1,15 @@
 const Amadeus = require("amadeus");
 
-const amadeus = new Amadeus({
-  clientId: process.env.AMADEUS_API_KEY,
-  clientSecret: process.env.AMADEUS_API_SECRET,
-});
+console.log("CLIENT ID:", process.env.AMADEUS_CLIENT_ID);
+console.log(
+  "CLIENT SECRET EXISTS:",
+  !!process.env.AMADEUS_CLIENT_SECRET
+);
 
-console.log("✅ Amadeus client initialized");
+const amadeus = new Amadeus({
+  clientId: process.env.AMADEUS_CLIENT_ID,
+  clientSecret: process.env.AMADEUS_CLIENT_SECRET,
+  hostname: "test",
+});
 
 module.exports = amadeus;
