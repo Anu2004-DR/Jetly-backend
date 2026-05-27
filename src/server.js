@@ -7,6 +7,8 @@ const morgan = require("morgan");
 const cron = require("node-cron");
 const rateLimit = require("express-rate-limit");
 const http = require("http");
+const airportRoutes =
+  require("./modules/airport/airport.routes");
 
 const app = express();
 
@@ -141,6 +143,8 @@ const verifyRoutes = require(
 
 const aiRoutes = require("./routes/ai.routes");
 
+
+
 /* ======================================================
    ROOT ROUTES
 ====================================================== */
@@ -193,7 +197,10 @@ app.use("/api/verify", verifyRoutes);
 app.use("/api/ai", aiLimiter, aiRoutes);
 
 
-
+app.use(
+  "/api/airports",
+  airportRoutes
+); 
 app.post("/api/booking-test", (req, res) => {
   console.log("✅ TEST BOOKING HIT");
 

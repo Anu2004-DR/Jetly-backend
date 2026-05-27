@@ -1,4 +1,5 @@
 const axios = require("axios");
+const amadeus = require("../../config/amadeus");
 
 let cachedToken = null;
 let tokenExpiry = null;
@@ -85,26 +86,35 @@ const getAccessToken = async () => {
 ========================= */
 
 const normalizeFlight = (flight) => {
-  const itinerary = flight.itineraries?.[0];
-  const segment = itinerary?.segments?.[0];
+
+  const itinerary =
+    flight.itineraries?.[0];
+
+  const segments =
+    itinerary?.segments || [];
+
+  const firstSegment = segments[0];
+
+  const lastSegment =
+    segments[segments.length - 1];
 
   return {
     id: flight.id,
 
     airline:
-      segment?.carrierCode || "Unknown",
+      firstSegment?.carrierCode || "Unknown",
 
     from:
-      segment?.departure?.iataCode || "",
+      firstSegment?.departure?.iataCode || "",
 
     to:
-      segment?.arrival?.iataCode || "",
+      lastSegment?.arrival?.iataCode || "",
 
     departure:
-      segment?.departure?.at || "",
+      firstSegment?.departure?.at || "",
 
     arrival:
-      segment?.arrival?.at || "",
+      lastSegment?.arrival?.at || "",
 
     duration:
       itinerary?.duration || "",
@@ -112,9 +122,12 @@ const normalizeFlight = (flight) => {
     price:
       Number(flight.price?.grandTotal || 0),
 
+    currency:
+      flight.price?.currency || "INR",
+
     stops:
-      itinerary?.segments?.length
-        ? itinerary.segments.length - 1
+      segments.length > 0
+        ? segments.length - 1
         : 0,
   };
 };
@@ -132,52 +145,55 @@ const searchFlightsService = async ({
 
   try {
 
-    const token = await getAccessToken();
-
-    const response = await axios.get(
-      "https://test.api.amadeus.com/v2/shopping/flight-offers",
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-
-        params: {
-          originLocationCode: origin,
-          destinationLocationCode: destination,
-          departureDate,
-          adults,
-          max: 5,
-          currencyCode: "INR",
-        },
-
-        timeout: 10000,
-      }
-    );
+    const response =
+      await amadeus.shopping.flightOffersSearch.get({
+        originLocationCode: origin,
+        destinationLocationCode: destination,
+        departureDate,
+        adults,
+        max: 5,
+        currencyCode: "INR",
+      });
 
     const flights =
-      response.data?.data || [];
+      response.data || [];
 
-    return {
+    const normalizedFlights =
+  flights.map(normalizeFlight);
+
+const filteredFlights =
+  normalizedFlights.filter(
+    (flight) =>
+      flight.to === destination
+  );
+
+return {
   fallback: false,
-  flights: flights.map(normalizeFlight),
+  flights: filteredFlights,
 };
 
   } catch (error) {
 
     console.log("========== AMADEUS ERROR ==========");
-console.dir(error?.response?.data, {
-  depth: null,
-});
-console.log("==================================");
 
-    console.log(
-      "⚠️ USING MOCK FLIGHTS"
+    console.dir(
+      error?.response?.result || error.message,
+      { depth: null }
     );
 
+    console.log("==================================");
+
+    console.log("⚠️ USING MOCK FLIGHTS");
+
     return {
-  fallback: true,
-  flights: mockFlights,
-};
+      fallback: true,
+
+      flights: mockFlights.map((flight) => ({
+        ...flight,
+        from: origin,
+        to: destination,
+      })),
+    };
   }
 };
 
