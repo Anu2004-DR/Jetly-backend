@@ -1,6 +1,9 @@
 const prisma = require("../../config/prisma");
 const { sendTicketEmail } = require("../../utils/email");
 const generateTicketPDF = require("../../utils/pdf");
+const {
+  sendBookingConfirmation,
+} = require("../../services/whatsapp.service");
 
 const normalizeTicketData = (booking) => {
   const route =
@@ -33,14 +36,18 @@ const normalizeTicketData = (booking) => {
         };
 
   return {
-    id: booking.id,
-    pnr: booking.pnr,
-    passengerName: booking.passengerName,
-    passengerEmail: booking.passengerEmail,
-    bookingType: booking.bookingType,
-    totalPrice: booking.totalPrice,
-    ...route,
-  };
+  id: booking.id,
+  pnr: booking.pnr,
+  passengerName: booking.passengerName,
+  passengerEmail: booking.passengerEmail,
+  passengerPhone: booking.passengerPhone,
+  bookingType: booking.bookingType,
+  totalPrice: booking.totalPrice,
+
+  flightNo: booking.flight?.flightNo || null,
+
+  ...route,
+};
 };
 
 const releaseSeats = async (tx, booking) => {
@@ -119,18 +126,35 @@ const verifyPaymentService = async ({
     result = normalizeTicketData(confirmedBooking);
   });
 
-  if (paymentStatus === "SUCCESS" && result?.passengerEmail) {
-    try {
-      const filePath = await generateTicketPDF(result);
+  if (paymentStatus === "SUCCESS") {
+  try {
+    const filePath = await generateTicketPDF(result);
+
+    // Email
+    if (result?.passengerEmail) {
       await sendTicketEmail(
         result.passengerEmail,
         result,
         filePath
       );
-    } catch (err) {
-      console.error("PDF/Email Error:", err.message);
     }
+
+    // WhatsApp
+if (result?.passengerPhone) {
+  await sendBookingConfirmation({
+    phone: result.passengerPhone,
+    passengerName: result.passengerName,
+    pnr: result.pnr,
+    flightNo: result.flightNo || "N/A",
+  });
+}
+  } catch (err) {
+    console.error(
+      "PDF/Email/WhatsApp Error:",
+      err.message
+    );
   }
+}
 
   return result;
 };

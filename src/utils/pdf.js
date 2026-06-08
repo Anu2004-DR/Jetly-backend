@@ -83,6 +83,8 @@ const generateQRBuffer = async (booking) => {
 const generateTicketPDF = async (booking) => {
   // ── Step 1: Generate QR buffer BEFORE opening the PDF stream.
   //    If QR fails, we still proceed — qrBuffer will be null.
+  console.log("BOOKING DATA:");
+console.log(JSON.stringify(booking, null, 2));
   const qrBuffer = await generateQRBuffer(booking);
 
   return new Promise((resolve, reject) => {
@@ -98,148 +100,171 @@ const generateTicketPDF = async (booking) => {
         `JetlyXO_Ticket_${booking.id}.pdf`
       );
 
-      const doc = new PDFDocument({ size: "A4", margin: 0 });
+      const doc = new PDFDocument({
+  size: "A4",
+  margin: 0,
+});
       const stream = fs.createWriteStream(filePath);
       doc.pipe(stream);
 
-      // ── HEADER ───────────────────────────────────────────────
-      doc.rect(0, 0, 595, 80).fill("#1a73e8");
+      // Background
+doc.rect(0, 0, 595, 842).fill("#081225");
 
-      doc.fillColor("white").fontSize(26).text("JETLYXO", 50, 30);
+// White Card
+doc.roundedRect(25, 25, 545, 790, 20)
+   .fillAndStroke("white", "#081225");
 
-      doc.fontSize(12).text("E-Ticket / Boarding Pass", 380, 35);
+// Header
+doc.roundedRect(25, 25, 545, 130, 20)
+   .fill("#2563EB");
 
-      // ── PNR BAR ───────────────────────────────────────────────
-      doc.rect(0, 90, 595, 30).fill("#f1f3f4");
+doc.fillColor("white")
+   .font("Helvetica-Bold")
+   .fontSize(28)
+   .text("JETLY E-TICKET", 50, 60);
 
-      doc.fillColor("black").fontSize(12).text(`PNR: ${booking.pnr || "N/A"}`, 50, 100);
+doc.font("Helvetica")
+   .fontSize(14)
+   .text("Travel smarter. Travel faster.", 50, 100);
 
-      doc.fillColor("green").text("● CONFIRMED", 450, 100);
+doc.text(
+  `PNR: ${booking.pnr || "N/A"}`,
+  350,
+  60,
+  {
+    width: 180,
+    align: "right"
+  }
+);
+doc.fillColor("#22C55E")
+   .font("Helvetica-Bold")
+   .text("STATUS: CONFIRMED", 400, 95);
 
-      // ── PASSENGER DETAILS BOX ────────────────────────────────
-      doc.rect(50, 140, 230, 120).stroke();
+doc.fillColor("black");
 
-      doc.fontSize(14).fillColor("black").text("Passenger Details", 60, 150);
+// Passenger
+doc.fillColor("black");
 
-      doc
-        .fontSize(12)
-        .text(`Name: ${booking.passengerName || "N/A"}`, 60, 180)
-        .text(`Booking ID: ${booking.id}`, 60, 200)
-        .text(`Type: ${booking.bookingType}`, 60, 220);
+doc.fontSize(15)
+   .font("Helvetica")
+   .text("Passenger Name", 60, 190);
 
-      // ── JOURNEY DETAILS BOX ──────────────────────────────────
-      doc.rect(315, 140, 230, 120).stroke();
-
-      doc.fontSize(14).text("Journey Details", 325, 150);
-
-      doc
-        .fontSize(12)
-        .text(`From: ${booking.fromCity || "Bangalore"}`, 325, 180)
-        .text(`To: ${booking.toCity || "Delhi"}`, 325, 200)
-        .text(
-          `Date: ${
-            booking.date
-              ? new Date(booking.date).toLocaleDateString()
-              : new Date().toLocaleDateString()
-          }`,
-          325,
-          220
-        )
-        .text(`Time: ${booking.time || "06:30 AM"}`, 325, 240);
-
-      // ── PAYMENT DETAILS BOX ──────────────────────────────────
-      doc.rect(50, 280, 495, 80).stroke();
-
-      doc.fontSize(14).text("Payment Details", 60, 290);
-
-      doc
-        .fontSize(12)
-        .text(`Amount Paid: ₹${booking.totalPrice}`, 60, 320)
-        .text("Payment Status: SUCCESS", 60, 340);
-
-      // ── QR CODE SECTION ──────────────────────────────────────
-      //
-      //  Layout (y=380 onward):
-      //
-      //  [ Scan to verify ]     [ QR IMAGE 110×110 ]
-      //  [ label text     ]     [                  ]
-      //
-      //  QR sits right-aligned inside the outer border (x=435)
-      //  Left side shows a "Verify your ticket" label block.
-      //  If QR generation failed, a graceful fallback text is shown instead.
-
-      const QR_SIZE = 110;       // pt — scannable at any standard print resolution
-      const QR_X = 435;          // right-aligned with 10pt padding from border (595-20-130-10)
-      const QR_Y = 385;          // below payment box with comfortable breathing room
-
-      if (qrBuffer) {
-        // QR image — embedded directly from Buffer, no temp file
-        doc.image(qrBuffer, QR_X, QR_Y, {
-          width: QR_SIZE,
-          height: QR_SIZE,
-          fit: [QR_SIZE, QR_SIZE],
-          align: "center",
-          valign: "center",
-        });
-
-        // Label below QR
-        doc
-          .fontSize(8)
-          .fillColor("gray")
-          .text("Scan to verify ticket", QR_X, QR_Y + QR_SIZE + 4, {
-            width: QR_SIZE,
-            align: "center",
-          });
-
-        // Left-side label block aligned vertically with the QR
-        doc
-          .fontSize(11)
-          .fillColor("black")
-          .text("Ticket QR Code", 60, QR_Y + 10);
-
-        doc
-          .fontSize(9)
-          .fillColor("gray")
-          .text(
-            "Present this QR at the gate\nfor quick verification.",
-            60,
-            QR_Y + 28,
-            { width: 200 }
-          );
-      } else {
-        // ── GRACEFUL FALLBACK: QR failed — show booking ID prominently
-        doc
-          .fontSize(11)
-          .fillColor("black")
-          .text("Verification Code", 60, QR_Y + 10);
-
-        doc
-          .fontSize(9)
-          .fillColor("gray")
-          .text(
-            `Booking ID: ${booking.id}\nPresent this ID at the counter for verification.`,
-            60,
-            QR_Y + 28,
-            { width: 360 }
-          );
+doc.font("Helvetica-Bold")
+   .fontSize(24)
+   .text(
+      booking.passengerName || "Passenger",
+      60,
+      220,
+      {
+         width: 470,
+         ellipsis: true
       }
+   );
 
-      // ── FOOTER NOTE ──────────────────────────────────────────
-      doc
-        .fontSize(10)
-        .fillColor("gray")
-        .text(
-          "Please carry a valid ID proof. Arrive at least 30 minutes before departure.",
-          50,
-          510, // shifted down slightly from your original 400 to accommodate QR
-          { width: 495, align: "center" }
-        );
+// Journey
+doc.font("Helvetica")
+   .fontSize(15)
+   .text("Journey", 60, 310);
 
-      // ── OUTER BORDER ─────────────────────────────────────────
-      doc.rect(20, 20, 555, 802).stroke();
+doc.font("Helvetica-Bold")
+   .fontSize(28)
+   .text(booking.fromCity || "Bangalore", 60, 350);
 
-      doc.end();
+doc.strokeColor("#999999");
+doc.moveTo(240, 370)
+   .lineTo(360, 370)
+   .stroke();
 
+doc.fontSize(20)
+   .text(">", 295, 358);
+
+doc.fontSize(28)
+   .text(booking.toCity || "Delhi", 390, 350);
+
+doc.font("Helvetica")
+   .fontSize(16)
+   .text(booking.fromCode || "BLR", 60, 395);
+
+doc.text(booking.toCode || "DEL", 390, 395);
+
+// Details Box
+doc.roundedRect(60, 450, 475, 140, 10)
+   .stroke("#DADCE0");
+
+doc.fillColor("#666")
+   .fontSize(12);
+
+doc.text("Booking ID", 90, 480);
+doc.text("Type", 250, 480);
+doc.text("Fare", 400, 480);
+
+doc.fillColor("black")
+   .fontSize(16);
+
+doc.text(String(booking.id), 90, 510);
+doc.text(booking.bookingType || "FLIGHT", 250, 510);
+doc.text(`₹${booking.totalPrice || 0}`, 400, 510);
+
+doc.fillColor("#666")
+   .fontSize(12);
+
+doc.text("Date", 90, 550);
+doc.text("Time", 250, 550);
+doc.text("Seat", 400, 550);
+
+doc.fillColor("black")
+   .fontSize(16);
+
+doc.text(
+  booking.date
+    ? new Date(booking.date).toLocaleDateString("en-IN")
+    : "N/A",
+  90,
+  575
+);
+
+doc.text(
+  booking.time || "09:30 PM",
+  250,
+  575
+);
+
+doc.text(
+  booking.seat || "A1",
+  400,
+  575
+);
+
+// QR
+if (qrBuffer) {
+  doc.image(qrBuffer, 215, 610, {
+    width: 150,
+    height: 150,
+  });
+
+  doc.fontSize(12)
+     .fillColor("black")
+     .text(
+       "Scan to verify ticket",
+       215,
+       770,
+       {
+         width: 150,
+         align: "center",
+       }
+     );
+}
+
+// Footer
+doc.fontSize(10)
+   .fillColor("#666")
+   .text(
+   "Please carry valid ID proof during travel.",
+   60,
+   790
+);
+
+doc.end();
       stream.on("finish", () => {
         console.log("✅ PDF Created:", filePath);
         resolve(filePath);
@@ -256,3 +281,4 @@ const generateTicketPDF = async (booking) => {
 };
 
 module.exports = generateTicketPDF;
+
