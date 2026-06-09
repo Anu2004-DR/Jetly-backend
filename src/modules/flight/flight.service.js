@@ -4,6 +4,10 @@ const amadeus = require("../../config/amadeus");
 let cachedToken = null;
 let tokenExpiry = null;
 
+/* =========================
+   MOCK FLIGHTS
+========================= */
+
 const mockFlights = [
   {
     id: "MOCK-1",
@@ -15,6 +19,7 @@ const mockFlights = [
     arrival: "10:45",
     duration: "2h 15m",
     stops: 0,
+    seats: 12,
   },
   {
     id: "MOCK-2",
@@ -26,6 +31,19 @@ const mockFlights = [
     arrival: "15:40",
     duration: "2h 25m",
     stops: 0,
+    seats: 8,
+  },
+  {
+    id: "MOCK-3",
+    airline: "Vistara",
+    price: 7300,
+    from: "DEL",
+    to: "BOM",
+    departure: "18:00",
+    arrival: "21:20",
+    duration: "3h 20m",
+    stops: 1,
+    seats: 3,
   },
 ];
 
@@ -35,8 +53,6 @@ const mockFlights = [
 
 const getAccessToken = async () => {
   try {
-
-    // reuse token if still valid
     if (
       cachedToken &&
       tokenExpiry &&
@@ -63,21 +79,20 @@ const getAccessToken = async () => {
 
     cachedToken = response.data.access_token;
 
-    // token valid for ~30 mins safely
     tokenExpiry =
       Date.now() +
       (response.data.expires_in - 60) * 1000;
 
     return cachedToken;
-
   } catch (error) {
-
     console.error(
       "AMADEUS TOKEN ERROR:",
       error?.response?.data || error.message
     );
 
-    throw new Error("Failed to authenticate with Amadeus");
+    throw new Error(
+      "Failed to authenticate with Amadeus"
+    );
   }
 };
 
@@ -86,29 +101,42 @@ const getAccessToken = async () => {
 ========================= */
 
 const normalizeFlight = (flight) => {
-
   const itinerary =
     flight.itineraries?.[0];
 
   const segments =
     itinerary?.segments || [];
 
-  const firstSegment = segments[0];
+  const firstSegment =
+    segments[0];
 
   const lastSegment =
     segments[segments.length - 1];
+
+  const airlineMap = {
+    AI: "Air India",
+    "6E": "IndiGo",
+    UK: "Vistara",
+    SG: "SpiceJet",
+  };
 
   return {
     id: flight.id,
 
     airline:
-      firstSegment?.carrierCode || "Unknown",
+      airlineMap[
+        firstSegment?.carrierCode
+      ] ||
+      firstSegment?.carrierCode ||
+      "Unknown Airline",
 
     from:
-      firstSegment?.departure?.iataCode || "",
+      firstSegment?.departure?.iataCode ||
+      "",
 
     to:
-      lastSegment?.arrival?.iataCode || "",
+      lastSegment?.arrival?.iataCode ||
+      "",
 
     departure:
       firstSegment?.departure?.at || "",
@@ -120,15 +148,23 @@ const normalizeFlight = (flight) => {
       itinerary?.duration || "",
 
     price:
-      Number(flight.price?.grandTotal || 0),
+      Number(
+        flight.price?.grandTotal || 0
+      ),
 
     currency:
-      flight.price?.currency || "INR",
+      flight.price?.currency ||
+      "INR",
 
     stops:
       segments.length > 0
         ? segments.length - 1
         : 0,
+
+    seats:
+      Math.floor(
+        Math.random() * 15
+      ) + 1,
   };
 };
 
@@ -142,57 +178,69 @@ const searchFlightsService = async ({
   departureDate,
   adults = 1,
 }) => {
-
   try {
-
     const response =
-      await amadeus.shopping.flightOffersSearch.get({
-        originLocationCode: origin,
-        destinationLocationCode: destination,
-        departureDate,
-        adults,
-        max: 5,
-        currencyCode: "INR",
-      });
+      await amadeus.shopping.flightOffersSearch.get(
+        {
+          originLocationCode:
+            origin,
+          destinationLocationCode:
+            destination,
+          departureDate,
+          adults,
+          max: 10,
+          currencyCode: "INR",
+        }
+      );
 
     const flights =
       response.data || [];
 
     const normalizedFlights =
-  flights.map(normalizeFlight);
+      flights.map(
+        normalizeFlight
+      );
 
-const filteredFlights =
-  normalizedFlights.filter(
-    (flight) =>
-      flight.to === destination
-  );
+    const filteredFlights =
+      normalizedFlights.filter(
+        (flight) =>
+          flight.to ===
+          destination
+      );
 
-return {
-  fallback: false,
-  flights: filteredFlights,
-};
-
+    return {
+      fallback: false,
+      flights: filteredFlights,
+    };
   } catch (error) {
-
-    console.log("========== AMADEUS ERROR ==========");
+    console.log(
+      "========== AMADEUS ERROR =========="
+    );
 
     console.dir(
-      error?.response?.result || error.message,
+      error?.response?.result ||
+        error.message,
       { depth: null }
     );
 
-    console.log("==================================");
+    console.log(
+      "=================================="
+    );
 
-    console.log("⚠️ USING MOCK FLIGHTS");
+    console.log(
+      "⚠️ USING MOCK FLIGHTS"
+    );
 
     return {
       fallback: true,
-
-      flights: mockFlights.map((flight) => ({
-        ...flight,
-        from: origin,
-        to: destination,
-      })),
+      flights:
+        mockFlights.map(
+          (flight) => ({
+            ...flight,
+            from: origin,
+            to: destination,
+          })
+        ),
     };
   }
 };
