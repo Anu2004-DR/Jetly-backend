@@ -94,9 +94,12 @@ const verifyPaymentService = async ({
       await releaseSeats(tx, booking);
 
       await tx.booking.update({
-        where: { id: bookingId },
-        data: { status: "FAILED" },
-      });
+  where: { id: bookingId },
+  data: {
+    status: "FAILED",
+    lockExpiry: null,
+  },
+});
 
       result = { message: "Payment failed" };
       return;
@@ -104,7 +107,10 @@ const verifyPaymentService = async ({
 
     const confirmedBooking = await tx.booking.update({
       where: { id: bookingId },
-      data: { status: "CONFIRMED" },
+      data: {
+  status: "CONFIRMED",
+  lockExpiry: null,
+},
       include: { bus: true, train: true, flight: true },
     });
 
