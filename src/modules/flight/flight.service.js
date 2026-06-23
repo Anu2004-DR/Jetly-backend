@@ -103,6 +103,22 @@ const getAccessToken = async () => {
 /* =========================
    NORMALIZE RESPONSE
 ========================= */
+const formatDuration = (duration) => {
+  if (!duration) return "";
+
+  const match = duration.match(
+    /PT(?:(\d+)H)?(?:(\d+)M)?/
+  );
+
+  if (!match) return duration;
+
+  const hours = match[1] || 0;
+  const minutes = match[2] || 0;
+
+  return `${hours ? `${hours}h ` : ""}${
+    minutes ? `${minutes}m` : ""
+  }`.trim();
+};
 
 const normalizeFlight = (flight) => {
   const itinerary =
@@ -146,8 +162,9 @@ const normalizeFlight = (flight) => {
     arrival:
       lastSegment?.arrival?.at || "",
 
-    duration:
-      itinerary?.duration || "",
+    duration: formatDuration(
+  itinerary?.duration
+),
 
     price:
       Number(
