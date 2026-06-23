@@ -1,5 +1,9 @@
 const axios = require("axios");
 const amadeus = require("../../config/amadeus");
+const bontonService = require("../../services/bonton.service");
+
+const FLIGHT_PROVIDER =
+  process.env.FLIGHT_PROVIDER || "AMADEUS";
 
 let cachedToken = null;
 let tokenExpiry = null;
@@ -131,12 +135,10 @@ const normalizeFlight = (flight) => {
       "Unknown Airline",
 
     from:
-      firstSegment?.departure?.iataCode ||
-      "",
+      firstSegment?.departure?.iataCode || "",
 
     to:
-      lastSegment?.arrival?.iataCode ||
-      "",
+      lastSegment?.arrival?.iataCode || "",
 
     departure:
       firstSegment?.departure?.at || "",
@@ -153,8 +155,7 @@ const normalizeFlight = (flight) => {
       ),
 
     currency:
-      flight.price?.currency ||
-      "INR",
+      flight.price?.currency || "INR",
 
     stops:
       segments.length > 0
@@ -179,6 +180,26 @@ const searchFlightsService = async ({
   adults = 1,
 }) => {
   try {
+    /* =========================
+       BONTON PROVIDER
+    ========================= */
+
+    if (
+      FLIGHT_PROVIDER.toUpperCase() ===
+      "BONTON"
+    ) {
+      return await bontonService.searchFlights({
+        origin,
+        destination,
+        departureDate,
+        adults,
+      });
+    }
+
+    /* =========================
+       AMADEUS PROVIDER
+    ========================= */
+
     const response =
       await amadeus.shopping.flightOffersSearch.get(
         {
@@ -204,17 +225,17 @@ const searchFlightsService = async ({
     const filteredFlights =
       normalizedFlights.filter(
         (flight) =>
-          flight.to ===
-          destination
+          flight.to === destination
       );
 
     return {
       fallback: false,
+      provider: "AMADEUS",
       flights: filteredFlights,
     };
   } catch (error) {
     console.log(
-      "========== AMADEUS ERROR =========="
+      "========== FLIGHT SEARCH ERROR =========="
     );
 
     console.dir(
@@ -224,7 +245,7 @@ const searchFlightsService = async ({
     );
 
     console.log(
-      "=================================="
+      "========================================="
     );
 
     console.log(
@@ -233,6 +254,7 @@ const searchFlightsService = async ({
 
     return {
       fallback: true,
+      provider: "MOCK",
       flights:
         mockFlights.map(
           (flight) => ({
@@ -246,5 +268,16 @@ const searchFlightsService = async ({
 };
 
 module.exports = {
+  searchFlights: async (from, to, date) => {
+    const result = await searchFlightsService({
+      origin: from,
+      destination: to,
+      departureDate: date,
+      adults: 1,
+    });
+
+    return result.flights;
+  },
+
   searchFlightsService,
 };
