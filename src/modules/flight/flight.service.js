@@ -1,6 +1,7 @@
 const axios = require("axios");
 const amadeus = require("../../config/amadeus");
-const bontonService = require("../../services/bonton.service");
+const bontonSearch = require("../../services/providers/bonton/search");
+const normalizeBonton = require("../../services/providers/bonton/normalize");
 
 const FLIGHT_PROVIDER =
   process.env.FLIGHT_PROVIDER || "AMADEUS";
@@ -201,17 +202,30 @@ const searchFlightsService = async ({
        BONTON PROVIDER
     ========================= */
 
-    if (
-      FLIGHT_PROVIDER.toUpperCase() ===
-      "BONTON"
-    ) {
-      return await bontonService.searchFlights({
-        origin,
-        destination,
-        departureDate,
-        adults,
-      });
-    }
+    if (FLIGHT_PROVIDER.toUpperCase() === "BONTON") {
+
+  const payload = {
+    org: origin,
+    dst: destination,
+    ddt: departureDate,
+    rdt: "",
+    cbcls: "Economy",
+    fartyp: "Regular",
+    adt: adults,
+    chd: 0,
+    inf: 0,
+    mcty: [],
+    tid: "",
+  };
+
+  const response = await bontonSearch.searchFlights(payload);
+
+  return {
+    fallback: false,
+    provider: "BONTON",
+    flights: normalizeBonton(response),
+  };
+}
 
     /* =========================
        AMADEUS PROVIDER

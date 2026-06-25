@@ -1,8 +1,8 @@
 const client = require("./client");
 
-async function searchFlights(payload) {
+async function bookFlight(payload) {
   const { data } = await client.post(
-    "/flight/v2/search",
+    "/flight/v2/book",
     payload
   );
 
@@ -10,5 +10,5 @@ async function searchFlights(payload) {
 }
 
 module.exports = {
-  searchFlights,
+  bookFlight,
 };
